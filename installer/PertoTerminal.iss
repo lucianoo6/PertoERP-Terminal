@@ -12,6 +12,9 @@
   #define OutputDir "..\dist"
 #endif
 
+; O campo de versão do Windows só aceita números: "0.0.0-abc1234" (build fora de tag) vira "0.0.0".
+#define NumericVersion Copy(AppVersion, 1, Pos("-", AppVersion + "-") - 1)
+
 #define AppName "Perto Terminal"
 #define AppExe "PertoTerminal.exe"
 
@@ -42,7 +45,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=no
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#NumericVersion}
 VersionInfoProductName={#AppName}
 VersionInfoDescription=Instalador do {#AppName}
 
