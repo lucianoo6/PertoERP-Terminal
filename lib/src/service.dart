@@ -318,7 +318,7 @@ class TerminalService extends ChangeNotifier {
     try {
       if (_log == null) {
         TerminalConfig.directory.createSync(recursive: true);
-        final file = File('${TerminalConfig.directory.path}\\terminal.log');
+        final file = File('${TerminalConfig.directory.path}${Platform.pathSeparator}terminal.log');
         if (file.existsSync() && file.lengthSync() > 5 << 20) {
           file.renameSync('${file.path}.old');
         }

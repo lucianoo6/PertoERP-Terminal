@@ -92,9 +92,9 @@ BEGIN
             VALUE "CompanyName", "br.com.pertoerp" "\0"
             VALUE "FileDescription", "Perto Terminal" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "PertoTerminalFlutter" "\0"
+            VALUE "InternalName", "PertoTerminal" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 br.com.pertoerp. All rights reserved." "\0"
-            VALUE "OriginalFilename", "PertoTerminalFlutter.exe" "\0"
+            VALUE "OriginalFilename", "PertoTerminal.exe" "\0"
             VALUE "ProductName", "Perto Terminal" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END

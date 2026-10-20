@@ -7,7 +7,7 @@ import '../src/config.dart';
 import '../src/escpos.dart';
 import '../src/printer.dart';
 import '../src/service.dart';
-import '../src/win_native.dart' as win;
+import '../src/autostart.dart';
 import 'theme.dart';
 
 /// Tela única: situação do terminal em cima, configuração embaixo.
@@ -22,8 +22,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  static const _autostartName = 'PertoTerminalFlutter';
-
   late TerminalConfig _draft;
   late final TextEditingController _server;
   late final TextEditingController _token;
@@ -48,7 +46,7 @@ class _HomePageState extends State<HomePage> {
     _address = TextEditingController(text: _draft.printerAddress);
     _path = TextEditingController(text: _draft.printerPath);
     _loadPrinters();
-    _autostart = Platform.isWindows && win.autostartCommand(_autostartName) != null;
+    _autostart = Autostart.supported && Autostart.enabled;
   }
 
   @override
@@ -136,7 +134,7 @@ class _HomePageState extends State<HomePage> {
 
   void _setAutostart(bool enabled) {
     try {
-      win.setAutostart(_autostartName, enabled ? '"${Platform.resolvedExecutable}" --hidden' : null);
+      Autostart.set(enabled);
       setState(() => _autostart = enabled);
     } catch (error) {
       _toast('Não foi possível alterar: $error', error: true);
@@ -241,7 +239,7 @@ class _HomePageState extends State<HomePage> {
                     initialValue: _printers.contains(_draft.printerName) ? _draft.printerName : null,
                     isExpanded: true,
                     decoration: InputDecoration(
-                      labelText: 'Impressora instalada no Windows',
+                      labelText: Platform.isWindows ? 'Impressora instalada no Windows' : 'Impressora instalada (CUPS)',
                       helperText: _printers.isEmpty ? 'Nenhuma impressora instalada. Instale o driver da térmica e clique em atualizar.' : null,
                     ),
                     items: [for (final name in _printers) DropdownMenuItem(value: name, child: Text(name, overflow: TextOverflow.ellipsis))],
@@ -258,7 +256,7 @@ class _HomePageState extends State<HomePage> {
             ),
           PrinterKind.file => TextField(
               controller: _path,
-              decoration: const InputDecoration(labelText: 'Porta ou arquivo', hintText: r'Ex.: COM3, LPT1 ou \\computador\termica'),
+              decoration: InputDecoration(labelText: 'Porta ou arquivo', hintText: Platform.isWindows ? r'Ex.: COM3, LPT1 ou \\computador\termica' : 'Ex.: /dev/usb/lp0'),
             ),
         },
         const SizedBox(height: 16),
@@ -347,10 +345,10 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
               const SizedBox(height: 8),
-              if (Platform.isWindows)
+              if (Autostart.supported)
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Abrir junto com o Windows'),
+                  title: Text(Platform.isWindows ? 'Abrir junto com o Windows' : 'Abrir junto com o sistema'),
                   subtitle: const Text('Fica na bandeja, sem abrir esta janela.'),
                   value: _autostart,
                   onChanged: _setAutostart,
@@ -371,7 +369,7 @@ class _HomePageState extends State<HomePage> {
                   icon: const Icon(Icons.folder_open_outlined),
                   onPressed: () {
                     TerminalConfig.directory.createSync(recursive: true);
-                    Process.run('explorer', [TerminalConfig.directory.path]);
+                    Process.run(Platform.isWindows ? 'explorer' : 'xdg-open', [TerminalConfig.directory.path]);
                   },
                 ),
               ),

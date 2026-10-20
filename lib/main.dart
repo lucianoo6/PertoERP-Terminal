@@ -11,7 +11,8 @@ import 'src/service.dart';
 import 'ui/home_page.dart';
 import 'ui/theme.dart';
 
-const appVersion = '0.1.1';
+/// Preenchida pelo build do GitHub a partir da tag (ex.: v1.2.0 → 1.2.0).
+const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: 'dev');
 
 /// Perto Terminal (Flutter): fica na bandeja e imprime na térmica os cupons e DANFEs NFC-e enviados pelo PertoERP.
 Future<void> main(List<String> args) async {
@@ -100,7 +101,8 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
 
     if (status.health != _trayHealth) {
       _trayHealth = status.health;
-      await trayManager.setIcon('assets/tray/${status.health.name}.ico');
+      // O Windows usa .ico; a bandeja do Linux (AppIndicator) usa PNG.
+      await trayManager.setIcon('assets/tray/${status.health.name}.${Platform.isWindows ? 'ico' : 'png'}');
     }
     if (title != _trayTooltip) {
       _trayTooltip = title;

@@ -146,10 +146,18 @@ class TerminalConfig {
         'appearance': appearance.name,
       };
 
-  /// Pasta própria desta versão, para poder rodar lado a lado com o Perto Terminal em Go.
-  static Directory get directory => Directory('${Platform.environment['APPDATA'] ?? '.'}\\PertoTerminalFlutter');
+  /// Pasta da configuração e do log: %APPDATA%\\PertoTerminalFlutter no Windows, ~/.config/perto-terminal no Linux.
+  static Directory get directory {
+    final env = Platform.environment;
 
-  static File get file => File('${directory.path}\\config.json');
+    if (Platform.isWindows) {
+      return Directory('${env['APPDATA'] ?? '.'}\\PertoTerminalFlutter');
+    }
+
+    return Directory('${env['XDG_CONFIG_HOME'] ?? '${env['HOME'] ?? '.'}/.config'}/perto-terminal');
+  }
+
+  static File get file => File('${directory.path}${Platform.pathSeparator}config.json');
 
   static TerminalConfig load() {
     try {
@@ -166,6 +174,10 @@ class TerminalConfig {
   void save() {
     directory.createSync(recursive: true);
     final temp = File('${file.path}.tmp')..writeAsStringSync(const JsonEncoder.withIndent('  ').convert(normalized().toJson()));
+    if (!Platform.isWindows) {
+      // Sem DPAPI fora do Windows: o arquivo fica legível só pelo usuário.
+      Process.runSync('chmod', ['600', temp.path]);
+    }
     temp.renameSync(file.path);
   }
 

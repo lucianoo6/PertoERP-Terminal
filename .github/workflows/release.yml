@@ -1,0 +1,100 @@
+# Testa a cada push. Numa tag vX.Y.Z, compila Windows e Linux e publica o Release com os dois pacotes
+# (é dessa lista de Releases que o site do PertoERP monta a página de downloads).
+name: Build e release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.47.2'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Versão
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"; else echo "value=0.0.0-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"; fi
+      - run: flutter build windows --release --dart-define=APP_VERSION=${{ steps.version.outputs.value }}
+      - name: Empacota
+        shell: pwsh
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "PertoTerminal-${{ steps.version.outputs.value }}-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: PertoTerminal-*-windows-x64.zip
+
+  linux:
+    needs: test
+    # 22.04: o pacote roda também em distribuições um pouco mais antigas (glibc menor).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependências do GTK e da bandeja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libayatana-appindicator3-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Versão
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"; else echo "value=0.0.0-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"; fi
+      - run: flutter build linux --release --dart-define=APP_VERSION=${{ steps.version.outputs.value }}
+      - name: Empacota
+        run: |
+          mkdir -p dist/perto-terminal
+          cp -r build/linux/x64/release/bundle/* dist/perto-terminal/
+          tar -czf "PertoTerminal-${{ steps.version.outputs.value }}-linux-x64.tar.gz" -C dist perto-terminal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: PertoTerminal-*-linux-x64.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Perto Terminal ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            PertoTerminal-*-windows-x64.zip
+            PertoTerminal-*-linux-x64.tar.gz
