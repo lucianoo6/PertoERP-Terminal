@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 
 /// Versão nova publicada nos Releases do GitHub.
 class AvailableUpdate {
-  AvailableUpdate({required this.version, required this.notes, required this.pageUrl, this.downloadUrl});
+  AvailableUpdate({required this.version, required this.notes, required this.pageUrl, this.downloadUrl, this.installerUrl});
 
   final String version;
   final String notes;
@@ -16,6 +16,12 @@ class AvailableUpdate {
 
   /// Pacote deste sistema (Windows ou Linux), quando o Release tiver.
   final String? downloadUrl;
+
+  /// Instalador do Windows: permite atualizar com um clique, sem o lojista baixar nada.
+  final String? installerUrl;
+
+  /// Windows: pelo instalador do Release. Linux: pelo script de instalação do site, que também atualiza.
+  bool get canInstall => Platform.isWindows ? installerUrl != null : Platform.isLinux;
 }
 
 /// Confere de tempos em tempos se saiu versão nova do Perto Terminal. Nunca instala nada sozinho:
@@ -38,8 +44,17 @@ class UpdateChecker extends ChangeNotifier {
   AvailableUpdate? _available;
   DateTime? _checkedAt;
   Timer? _timer;
+  double? _installProgress;
+  String? _installError;
 
   AvailableUpdate? get available => _available;
+
+  /// Progresso do download do instalador (0 a 1), enquanto "Atualizar agora" roda.
+  double? get installProgress => _installProgress;
+
+  String? get installError => _installError;
+
+  bool get installing => _installProgress != null;
 
   DateTime? get checkedAt => _checkedAt;
 
@@ -88,16 +103,16 @@ class UpdateChecker extends ChangeNotifier {
       }
 
       final platform = Platform.isWindows ? 'windows' : 'linux';
-      final asset = (release['assets'] as List? ?? [])
-          .cast<Map<String, dynamic>>()
-          .where((asset) => '${asset['name']}'.toLowerCase().contains(platform))
-          .firstOrNull;
+      final assets = (release['assets'] as List? ?? []).cast<Map<String, dynamic>>();
+      String? url(bool Function(String name) matches) =>
+          assets.where((asset) => matches('${asset['name']}'.toLowerCase())).map((asset) => '${asset['browser_download_url']}').firstOrNull;
 
       _set(AvailableUpdate(
         version: version,
         notes: '${release['body'] ?? ''}'.trim(),
         pageUrl: downloadsPage,
-        downloadUrl: asset == null ? null : '${asset['browser_download_url']}',
+        downloadUrl: url((name) => name.contains(platform) && !name.contains('instalador')),
+        installerUrl: url((name) => name.contains('windows') && name.contains('instalador') && name.endsWith('.exe')),
       ));
     } catch (_) {
       // Sem internet ou GitHub fora: tenta de novo no próximo intervalo, sem incomodar.
@@ -106,6 +121,67 @@ class UpdateChecker extends ChangeNotifier {
     }
 
     return _available;
+  }
+
+  /// Baixa o instalador da versão nova e roda em silêncio: ele fecha este terminal, troca os arquivos
+  /// e abre o novo já na bandeja. Quem chama deve encerrar o app logo depois.
+  Future<void> downloadAndInstall(AvailableUpdate update) async {
+    if (!update.canInstall || installing) {
+      return;
+    }
+
+    _installError = null;
+    _installProgress = 0;
+    notifyListeners();
+
+    if (Platform.isLinux) {
+      // O script baixa a última versão, fecha este terminal, troca os arquivos e abre o novo.
+      await Process.start('bash', ['-c', 'curl -fsSL "${update.pageUrl}/instalar.sh" | bash'], mode: ProcessStartMode.detached);
+      _installProgress = 1;
+      notifyListeners();
+
+      return;
+    }
+
+    final installer = update.installerUrl!;
+
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final file = File('${Directory.systemTemp.path}${Platform.pathSeparator}PertoTerminal-${update.version}-instalador.exe');
+
+    try {
+      final response = await (await client.getUrl(Uri.parse(installer))).close();
+      if (response.statusCode != 200) {
+        throw HttpException('o download respondeu ${response.statusCode}');
+      }
+
+      final total = response.contentLength;
+      var received = 0;
+      final sink = file.openWrite();
+      await for (final chunk in response) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (total > 0) {
+          _installProgress = received / total;
+          notifyListeners();
+        }
+      }
+      await sink.close();
+
+      if (total > 0 && received != total) {
+        throw const HttpException('o download veio incompleto');
+      }
+
+      await Process.start(file.path, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], mode: ProcessStartMode.detached);
+      _installProgress = 1;
+      notifyListeners();
+    } catch (error) {
+      _installProgress = null;
+      _installError = 'Não deu para atualizar agora ($error). Tente de novo ou baixe pelo site.';
+      notifyListeners();
+      rethrow;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   void _set(AvailableUpdate? update) {

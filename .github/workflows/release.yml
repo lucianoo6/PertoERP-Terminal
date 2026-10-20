@@ -48,10 +48,23 @@ jobs:
       - name: Empacota
         shell: pwsh
         run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "PertoTerminal-${{ steps.version.outputs.value }}-windows-x64.zip"
+      # Instalador (Avançar › Instalar › Concluir), o download principal para o lojista.
+      - name: Instalador
+        shell: pwsh
+        run: |
+          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup --no-progress -y | Out-Null
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc /Q "/DAppVersion=${{ steps.version.outputs.value }}" "/DSourceDir=$PWD\build\windows\x64\runner\Release" "/DOutputDir=$PWD" installer\PertoTerminal.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: PertoTerminal-*-windows-x64.zip
+          path: |
+            PertoTerminal-*-windows-x64.zip
+            PertoTerminal-*-windows-instalador.exe
 
   linux:
     needs: test
@@ -109,5 +122,6 @@ jobs:
           name: Perto Terminal ${{ github.ref_name }}
           body_path: release-notes.md
           files: |
+            PertoTerminal-*-windows-instalador.exe
             PertoTerminal-*-windows-x64.zip
             PertoTerminal-*-linux-x64.tar.gz

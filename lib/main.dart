@@ -48,6 +48,21 @@ Future<void> main(List<String> args) async {
   runApp(PertoTerminalApp(service: service, updates: updates));
 }
 
+/// "Atualizar agora": baixa o instalador, que roda em silêncio, e encerra este terminal para ele trocar os arquivos.
+Future<void> installUpdate(TerminalService service, UpdateChecker updates, AvailableUpdate update) async {
+  try {
+    await updates.downloadAndInstall(update);
+  } catch (_) {
+    return; // O erro aparece no aviso da janela.
+  }
+
+  TerminalService.log('atualizando para a versão ${update.version}');
+  await service.stop();
+  await trayManager.destroy();
+  await windowManager.setPreventClose(false);
+  exit(0);
+}
+
 /// Some da barra de tarefas e fica só o ícone ao lado do relógio.
 Future<void> hideToTray() async {
   await windowManager.hide();
@@ -125,7 +140,7 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
 
     await trayManager.setContextMenu(Menu(items: [
       MenuItem(key: 'status', label: title, disabled: true),
-      if (update != null) MenuItem(key: 'update', label: 'Baixar a versão nova (${update.version})'),
+      if (update != null) MenuItem(key: 'update', label: update.canInstall ? 'Atualizar agora (versão ${update.version})' : 'Baixar a versão nova (${update.version})'),
       MenuItem.separator(),
       MenuItem(key: 'open', label: 'Abrir Perto Terminal'),
       MenuItem(key: 'kick', label: 'Buscar impressões agora', disabled: !status.configured),
@@ -150,7 +165,10 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
         service.kick();
       case 'update':
         final update = updates.available;
-        if (update != null) {
+        if (update != null && update.canInstall) {
+          await _showWindow();
+          await installUpdate(service, updates, update);
+        } else if (update != null) {
           await openInBrowser(update.downloadUrl ?? update.pageUrl);
         }
       case 'test':

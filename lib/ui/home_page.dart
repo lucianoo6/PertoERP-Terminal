@@ -7,6 +7,7 @@ import '../src/config.dart';
 import '../src/escpos.dart';
 import '../src/printer.dart';
 import '../src/service.dart';
+import '../main.dart' show installUpdate;
 import '../src/updates.dart';
 import '../src/autostart.dart';
 import 'theme.dart';
@@ -167,7 +168,15 @@ class _HomePageState extends State<HomePage> {
                     listenable: widget.updates,
                     builder: (context, _) => widget.updates.available == null
                         ? const SizedBox.shrink()
-                        : Padding(padding: const EdgeInsets.only(bottom: 12), child: _UpdateBanner(update: widget.updates.available!, current: widget.version)),
+                        : Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _UpdateBanner(
+                              update: widget.updates.available!,
+                              current: widget.version,
+                              updates: widget.updates,
+                              onInstall: () => installUpdate(service, widget.updates, widget.updates.available!),
+                            ),
+                          ),
                   ),
                   ListenableBuilder(listenable: service, builder: (context, _) => _StatusCard(status: service.status, version: widget.version, onKick: service.kick)),
                   const SizedBox(height: 12),
@@ -626,10 +635,12 @@ class _BrandHeader extends StatelessWidget {
 }
 
 class _UpdateBanner extends StatelessWidget {
-  const _UpdateBanner({required this.update, required this.current});
+  const _UpdateBanner({required this.update, required this.current, required this.updates, required this.onInstall});
 
   final AvailableUpdate update;
   final String current;
+  final UpdateChecker updates;
+  final VoidCallback onInstall;
 
   @override
   Widget build(BuildContext context) {
@@ -662,7 +673,10 @@ class _UpdateBanner extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 4),
-          Text('Você está na $current. Baixe, feche este terminal pela bandeja (Sair) e abra o novo na mesma pasta: a configuração continua a mesma.',
+          Text(
+              update.canInstall
+                  ? 'Você está na $current. Clique em "Atualizar agora": o terminal fecha, atualiza e volta sozinho em poucos segundos, com a mesma configuração.'
+                  : 'Você está na $current. Baixe a versão nova e siga o passo a passo do site: a configuração continua a mesma.',
               style: theme.textTheme.bodySmall?.copyWith(color: colors.muted)),
           if (notes.isNotEmpty) ...[
             const SizedBox(height: 8),
@@ -672,19 +686,39 @@ class _UpdateBanner extends StatelessWidget {
                 child: Text('• $note', style: theme.textTheme.bodySmall?.copyWith(color: colors.ink), maxLines: 2, overflow: TextOverflow.ellipsis),
               ),
           ],
+          if (updates.installError != null) ...[
+            const SizedBox(height: 8),
+            Text(updates.installError!, style: theme.textTheme.bodySmall?.copyWith(color: const Color(0xFFB91C1C))),
+          ],
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              FilledButton.icon(
-                onPressed: () => openInBrowser(update.downloadUrl ?? update.pageUrl),
-                icon: const Icon(Icons.download, size: 18),
-                label: const Text('Baixar agora'),
-              ),
-              OutlinedButton(onPressed: () => openInBrowser(update.pageUrl), child: const Text('Como instalar')),
-            ],
-          ),
+          if (updates.installing)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                LinearProgressIndicator(value: updates.installProgress, color: colors.green, backgroundColor: colors.track, minHeight: 6, borderRadius: BorderRadius.circular(3)),
+                const SizedBox(height: 6),
+                Text(
+                  (updates.installProgress ?? 0) >= 1 ? 'Instalando… o terminal volta sozinho em instantes.' : 'Baixando a versão ${update.version}… ${((updates.installProgress ?? 0) * 100).round()}%',
+                  style: theme.textTheme.bodySmall?.copyWith(color: colors.muted),
+                ),
+              ],
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (update.canInstall)
+                  FilledButton.icon(onPressed: onInstall, icon: const Icon(Icons.system_update_alt, size: 18), label: const Text('Atualizar agora'))
+                else
+                  FilledButton.icon(
+                    onPressed: () => openInBrowser(update.downloadUrl ?? update.pageUrl),
+                    icon: const Icon(Icons.download, size: 18),
+                    label: const Text('Baixar agora'),
+                  ),
+                OutlinedButton(onPressed: () => openInBrowser(update.pageUrl), child: Text(update.canInstall ? 'Ver novidades' : 'Como instalar')),
+              ],
+            ),
         ],
       ),
     );
