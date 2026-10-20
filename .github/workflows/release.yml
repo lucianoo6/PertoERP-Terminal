@@ -57,8 +57,15 @@ jobs:
           $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $iscc) { throw 'ISCC.exe não encontrado depois de instalar o Inno Setup' }
           Write-Host "Usando $iscc"
-          & $iscc "/DAppVersion=${{ steps.version.outputs.value }}" "/DSourceDir=$PWD\build\windows\x64\runner\Release" "/DOutputDir=$PWD" installer\PertoTerminal.iss
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $output = & $iscc "/DAppVersion=${{ steps.version.outputs.value }}" "/DSourceDir=$PWD\build\windows\x64\runner\Release" "/DOutputDir=$PWD" installer\PertoTerminal.iss 2>&1
+          $code = $LASTEXITCODE
+          $output | ForEach-Object { Write-Host $_ }
+          if ($code -ne 0) {
+            # Anotação: aparece no resumo do job, mesmo para quem não tem acesso aos logs.
+            $tail = ($output | Select-Object -Last 12 | ForEach-Object { "$_" }) -join ' | '
+            Write-Host "::error title=Inno Setup ($code)::$tail"
+            exit $code
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
