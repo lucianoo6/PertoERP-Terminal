@@ -97,6 +97,17 @@ class TerminalService extends ChangeNotifier {
     await _restart();
   }
 
+  /// Troca a aparência na hora, sem reconectar.
+  void setAppearance(Appearance appearance) {
+    _config = _config.copyWith(appearance: appearance);
+    try {
+      _config.save();
+    } catch (error) {
+      log('configuração: $error');
+    }
+    notifyListeners();
+  }
+
   /// Pede uma consulta imediata da fila (evento do Reverb ou clique do usuário).
   void kick() {
     if (_kick != null && !_kick!.isCompleted) {
@@ -293,10 +304,16 @@ class TerminalService extends ChangeNotifier {
 
   static IOSink? _log;
 
+  /// Desligado nos testes, para não misturar com o log do terminal de verdade.
+  static bool logToFile = true;
+
   /// Grava em terminal.log (recomeçando quando passa de 5 MB).
   static void log(String message) {
     final line = '${DateTime.now().toIso8601String().substring(0, 19).replaceFirst('T', ' ')} $message';
     debugPrint(line);
+    if (!logToFile) {
+      return;
+    }
 
     try {
       if (_log == null) {

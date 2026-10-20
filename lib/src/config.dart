@@ -7,6 +7,9 @@ import 'win_native.dart' as win;
 /// Para onde vão os bytes ESC/POS.
 enum PrinterKind { windows, network, file }
 
+/// Aparência da janela: clara como o PertoERP (padrão), escura ou igual ao Windows.
+enum Appearance { light, dark, system }
+
 class TerminalConfig {
   const TerminalConfig({
     this.serverUrl = '',
@@ -22,6 +25,7 @@ class TerminalConfig {
     this.copies = 1,
     this.insecureTls = false,
     this.pollSeconds = 5,
+    this.appearance = Appearance.light,
   });
 
   /// Mesmo formato de arquivo da versão em Go (o token vai cifrado pelo DPAPI).
@@ -42,6 +46,7 @@ class TerminalConfig {
       copies: (json['copies'] as num?)?.toInt() ?? 1,
       insecureTls: json['insecure_tls'] as bool? ?? false,
       pollSeconds: (json['poll_seconds'] as num?)?.toInt() ?? 5,
+      appearance: Appearance.values.firstWhere((value) => value.name == json['appearance'], orElse: () => Appearance.light),
     ).normalized();
   }
 
@@ -68,6 +73,8 @@ class TerminalConfig {
 
   /// Intervalo de consulta quando o tempo real está fora.
   final int pollSeconds;
+
+  final Appearance appearance;
 
   bool get printerReady => switch (printerKind) {
         PrinterKind.windows => printerName.isNotEmpty,
@@ -101,6 +108,7 @@ class TerminalConfig {
     int? copies,
     bool? insecureTls,
     int? pollSeconds,
+    Appearance? appearance,
   }) =>
       TerminalConfig(
         serverUrl: serverUrl ?? this.serverUrl,
@@ -116,6 +124,7 @@ class TerminalConfig {
         copies: copies ?? this.copies,
         insecureTls: insecureTls ?? this.insecureTls,
         pollSeconds: pollSeconds ?? this.pollSeconds,
+        appearance: appearance ?? this.appearance,
       );
 
   Map<String, dynamic> toJson() => {
@@ -134,6 +143,7 @@ class TerminalConfig {
         'copies': copies,
         'insecure_tls': insecureTls,
         'poll_seconds': pollSeconds,
+        'appearance': appearance.name,
       };
 
   /// Pasta própria desta versão, para poder rodar lado a lado com o Perto Terminal em Go.

@@ -8,11 +8,10 @@ import 'package:windows_single_instance/windows_single_instance.dart';
 
 import 'src/config.dart';
 import 'src/service.dart';
-import 'src/tray_icons.dart';
 import 'ui/home_page.dart';
 import 'ui/theme.dart';
 
-const appVersion = '0.1.0';
+const appVersion = '0.1.1';
 
 /// Perto Terminal (Flutter): fica na bandeja e imprime na térmica os cupons e DANFEs NFC-e enviados pelo PertoERP.
 Future<void> main(List<String> args) async {
@@ -46,7 +45,16 @@ Future<void> main(List<String> args) async {
   runApp(PertoTerminalApp(service: service));
 }
 
+/// Some da barra de tarefas e fica só o ícone ao lado do relógio.
+Future<void> hideToTray() async {
+  await windowManager.hide();
+  await windowManager.setSkipTaskbar(true);
+}
+
 Future<void> _showWindow() async {
+  if (await windowManager.isMinimized()) {
+    await windowManager.restore();
+  }
   await windowManager.setSkipTaskbar(false);
   await windowManager.show();
   await windowManager.focus();
@@ -92,7 +100,7 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
 
     if (status.health != _trayHealth) {
       _trayHealth = status.health;
-      await trayManager.setIcon(TrayIcons.path(status.health));
+      await trayManager.setIcon('assets/tray/${status.health.name}.ico');
     }
     if (title != _trayTooltip) {
       _trayTooltip = title;
@@ -144,22 +152,30 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
     }
   }
 
-  /// Fechar a janela só esconde: o terminal continua imprimindo pela bandeja.
+  /// Fechar ou minimizar a janela só esconde: o terminal continua imprimindo pela bandeja.
   @override
-  Future<void> onWindowClose() async {
-    await windowManager.hide();
-    await windowManager.setSkipTaskbar(true);
-  }
+  Future<void> onWindowClose() => hideToTray();
+
+  @override
+  Future<void> onWindowMinimize() => hideToTray();
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Perto Terminal',
-      debugShowCheckedModeBanner: false,
-      scaffoldMessengerKey: _messenger,
-      theme: buildTheme(Brightness.light),
-      darkTheme: buildTheme(Brightness.dark),
-      home: HomePage(service: service, version: appVersion),
+    return ListenableBuilder(
+      listenable: service,
+      builder: (context, _) => MaterialApp(
+        title: 'Perto Terminal',
+        debugShowCheckedModeBanner: false,
+        scaffoldMessengerKey: _messenger,
+        theme: buildTheme(Brightness.light),
+        darkTheme: buildTheme(Brightness.dark),
+        themeMode: switch (service.config.appearance) {
+          Appearance.light => ThemeMode.light,
+          Appearance.dark => ThemeMode.dark,
+          Appearance.system => ThemeMode.system,
+        },
+        home: HomePage(service: service, version: appVersion),
+      ),
     );
   }
 }

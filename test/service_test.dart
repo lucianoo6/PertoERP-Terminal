@@ -67,6 +67,8 @@ void main() {
   late _FakePrinter printer;
   late TerminalService service;
 
+  setUpAll(() => TerminalService.logToFile = false);
+
   setUp(() async {
     api = _FakeServer();
     await api.start();

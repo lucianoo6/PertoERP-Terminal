@@ -74,6 +74,7 @@ class _HomePageState extends State<HomePage> {
         token: _token.text,
         printerAddress: _address.text,
         printerPath: _path.text,
+        appearance: service.config.appearance,
       );
 
   Future<void> _run(Future<void> Function() action) async {
@@ -152,6 +153,8 @@ class _HomePageState extends State<HomePage> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 children: [
+                  _BrandHeader(version: widget.version),
+                  const SizedBox(height: 14),
                   ListenableBuilder(listenable: service, builder: (context, _) => _StatusCard(status: service.status, version: widget.version, onKick: service.kick)),
                   const SizedBox(height: 12),
                   _connectionCard(),
@@ -201,7 +204,7 @@ class _HomePageState extends State<HomePage> {
                 Expanded(
                   child: Row(
                     children: [
-                      Icon(_checkOk ? Icons.check_circle : Icons.error_outline, size: 18, color: _checkOk ? brandGreen : const Color(0xFFDC2626)),
+                      Icon(_checkOk ? Icons.check_circle : Icons.error_outline, size: 18, color: _checkOk ? PertoColors.of(context).green : const Color(0xFFDC2626)),
                       const SizedBox(width: 6),
                       Expanded(child: Text(_checkMessage!, style: Theme.of(context).textTheme.bodySmall, maxLines: 3, overflow: TextOverflow.ellipsis)),
                     ],
@@ -328,6 +331,22 @@ class _HomePageState extends State<HomePage> {
             title: const Text('Mais opções'),
             childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             children: [
+              Align(alignment: Alignment.centerLeft, child: Text('Aparência', style: Theme.of(context).textTheme.labelLarge)),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<Appearance>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: Appearance.light, label: Text('Claro'), icon: Icon(Icons.light_mode_outlined, size: 18)),
+                    ButtonSegment(value: Appearance.dark, label: Text('Escuro'), icon: Icon(Icons.dark_mode_outlined, size: 18)),
+                    ButtonSegment(value: Appearance.system, label: Text('Igual ao Windows'), icon: Icon(Icons.desktop_windows_outlined, size: 18)),
+                  ],
+                  selected: {service.config.appearance},
+                  onSelectionChanged: (selection) => service.setAppearance(selection.first),
+                ),
+              ),
+              const SizedBox(height: 8),
               if (Platform.isWindows)
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -369,7 +388,14 @@ class _HomePageState extends State<HomePage> {
         ),
         child: Row(
           children: [
-            TextButton(onPressed: () => windowManager.close(), child: const Text('Esconder na bandeja')),
+            Tooltip(
+              message: 'O terminal continua imprimindo pelo ícone ao lado do relógio.',
+              child: OutlinedButton.icon(
+                onPressed: () => windowManager.close(),
+                icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                label: const Text('Esconder na bandeja'),
+              ),
+            ),
             const Spacer(),
             FilledButton.icon(
               onPressed: _busy ? null : _save,
@@ -391,7 +417,7 @@ class _StatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final color = statusColor(status.health);
+    final color = statusColor(context, status.health);
     final lastPrint = status.lastPrintAt;
 
     return Card(
@@ -460,6 +486,23 @@ class _StatusCard extends StatelessWidget {
                 child: SelectableText(status.lastError, style: theme.textTheme.bodySmall?.copyWith(color: const Color(0xFFB91C1C))),
               ),
             ],
+            if (status.configured) ...[
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: PertoColors.of(context).muted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Pode fechar ou minimizar esta janela: o terminal continua imprimindo pelo ícone verde ao lado do relógio. '
+                      'Se ele não aparecer, clique na setinha ^ da barra de tarefas.',
+                      style: theme.textTheme.bodySmall?.copyWith(color: PertoColors.of(context).muted),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (!status.configured) ...[
               const SizedBox(height: 8),
               Text('Preencha a conexão e a impressora abaixo e clique em "Salvar e conectar".', style: theme.textTheme.bodySmall),
@@ -480,7 +523,7 @@ class _Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = on ? brandGreen : Theme.of(context).colorScheme.onSurfaceVariant;
+    final color = on ? PertoColors.of(context).green : PertoColors.of(context).muted;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -531,6 +574,32 @@ class _Section extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _BrandHeader extends StatelessWidget {
+  const _BrandHeader({required this.version});
+
+  final String version;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = PertoColors.of(context);
+
+    return Row(
+      children: [
+        ClipRRect(borderRadius: BorderRadius.circular(9), child: Image.asset('assets/brand/icon.png', width: 36, height: 36)),
+        const SizedBox(width: 10),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Perto Terminal', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: colors.ink)),
+            Text('Impressão do PertoERP · versão $version', style: theme.textTheme.bodySmall?.copyWith(color: colors.muted)),
+          ],
+        ),
+      ],
     );
   }
 }
