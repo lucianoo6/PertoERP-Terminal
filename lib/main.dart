@@ -8,6 +8,7 @@ import 'package:windows_single_instance/windows_single_instance.dart';
 
 import 'src/config.dart';
 import 'src/service.dart';
+import 'src/updates.dart';
 import 'ui/home_page.dart';
 import 'ui/theme.dart';
 
@@ -24,6 +25,7 @@ Future<void> main(List<String> args) async {
   await windowManager.ensureInitialized();
 
   final service = TerminalService(TerminalConfig.load())..start();
+  final updates = UpdateChecker(currentVersion: appVersion)..start();
   TerminalService.log('Perto Terminal (Flutter) $appVersion iniciado');
 
   final startHidden = args.contains('--hidden') || service.config.configured;
@@ -43,7 +45,7 @@ Future<void> main(List<String> args) async {
     },
   );
 
-  runApp(PertoTerminalApp(service: service));
+  runApp(PertoTerminalApp(service: service, updates: updates));
 }
 
 /// Some da barra de tarefas e fica só o ícone ao lado do relógio.
@@ -62,9 +64,10 @@ Future<void> _showWindow() async {
 }
 
 class PertoTerminalApp extends StatefulWidget {
-  const PertoTerminalApp({super.key, required this.service});
+  const PertoTerminalApp({super.key, required this.service, required this.updates});
 
   final TerminalService service;
+  final UpdateChecker updates;
 
   @override
   State<PertoTerminalApp> createState() => _PertoTerminalAppState();
@@ -78,18 +81,22 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
 
   TerminalService get service => widget.service;
 
+  UpdateChecker get updates => widget.updates;
+
   @override
   void initState() {
     super.initState();
     trayManager.addListener(this);
     windowManager.addListener(this);
     service.addListener(_syncTray);
+    updates.addListener(_syncTray);
     _syncTray();
   }
 
   @override
   void dispose() {
     service.removeListener(_syncTray);
+    updates.removeListener(_syncTray);
     trayManager.removeListener(this);
     windowManager.removeListener(this);
     super.dispose();
@@ -98,18 +105,19 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
   Future<void> _syncTray() async {
     final status = service.status;
     final title = statusTitle(status);
+    final update = updates.available;
 
     if (status.health != _trayHealth) {
       _trayHealth = status.health;
       // O Windows usa .ico; a bandeja do Linux (AppIndicator) usa PNG.
       await trayManager.setIcon('assets/tray/${status.health.name}.${Platform.isWindows ? 'ico' : 'png'}');
     }
-    if (title != _trayTooltip) {
-      _trayTooltip = title;
-      await trayManager.setToolTip('Perto Terminal · $title');
+    if ('$title${update?.version}' != _trayTooltip) {
+      _trayTooltip = '$title${update?.version}';
+      await trayManager.setToolTip('Perto Terminal · $title${update == null ? '' : ' · nova versão ${update.version}'}');
     }
 
-    final signature = '$title|${status.configured}|${service.config.printerReady}';
+    final signature = '$title|${status.configured}|${service.config.printerReady}|${update?.version}';
     if (signature == _menuSignature) {
       return;
     }
@@ -117,6 +125,7 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
 
     await trayManager.setContextMenu(Menu(items: [
       MenuItem(key: 'status', label: title, disabled: true),
+      if (update != null) MenuItem(key: 'update', label: 'Baixar a versão nova (${update.version})'),
       MenuItem.separator(),
       MenuItem(key: 'open', label: 'Abrir Perto Terminal'),
       MenuItem(key: 'kick', label: 'Buscar impressões agora', disabled: !status.configured),
@@ -139,6 +148,11 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
         await _showWindow();
       case 'kick':
         service.kick();
+      case 'update':
+        final update = updates.available;
+        if (update != null) {
+          await openInBrowser(update.downloadUrl ?? update.pageUrl);
+        }
       case 'test':
         try {
           await service.testPrint(service.config);
@@ -176,7 +190,7 @@ class _PertoTerminalAppState extends State<PertoTerminalApp> with TrayListener, 
           Appearance.dark => ThemeMode.dark,
           Appearance.system => ThemeMode.system,
         },
-        home: HomePage(service: service, version: appVersion),
+        home: HomePage(service: service, updates: updates, version: appVersion),
       ),
     );
   }

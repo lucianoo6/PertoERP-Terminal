@@ -88,13 +88,26 @@ jobs:
     needs: [windows, linux]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # As novidades que aparecem no site e no aviso do terminal são a mensagem da tag
+      # (git tag -a v1.2.0 -m "Novo: ..."). Sem mensagem, fica um texto padrão.
+      - name: Novidades
+        run: |
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          notes="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed '/-----BEGIN PGP SIGNATURE-----/,$d')"
+          if [ -z "$(echo "$notes" | tr -d '[:space:]')" ] || [ "$notes" = "$(git log -1 --format=%B "$GITHUB_REF_NAME")" ]; then
+            notes="Melhorias e correções do Perto Terminal."
+          fi
+          printf '%s\n' "$notes" > release-notes.md
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
           name: Perto Terminal ${{ github.ref_name }}
-          generate_release_notes: true
+          body_path: release-notes.md
           files: |
             PertoTerminal-*-windows-x64.zip
             PertoTerminal-*-linux-x64.tar.gz

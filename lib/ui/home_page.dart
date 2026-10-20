@@ -7,14 +7,16 @@ import '../src/config.dart';
 import '../src/escpos.dart';
 import '../src/printer.dart';
 import '../src/service.dart';
+import '../src/updates.dart';
 import '../src/autostart.dart';
 import 'theme.dart';
 
 /// Tela única: situação do terminal em cima, configuração embaixo.
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.service, required this.version});
+  const HomePage({super.key, required this.service, required this.updates, required this.version});
 
   final TerminalService service;
+  final UpdateChecker updates;
   final String version;
 
   @override
@@ -34,6 +36,7 @@ class _HomePageState extends State<HomePage> {
   bool _autostart = false;
   String? _checkMessage;
   bool _checkOk = false;
+  String? _updateMessage;
 
   TerminalService get service => widget.service;
 
@@ -132,6 +135,13 @@ class _HomePageState extends State<HomePage> {
         _toast('Configuração salva. O terminal já está conectando.');
       });
 
+  Future<void> _checkUpdates() => _run(() async {
+        final update = await widget.updates.check();
+        setState(() => _updateMessage = update == null
+            ? 'Você já está na versão mais nova (${widget.version}).'
+            : 'Saiu a versão ${update.version}: veja o aviso no topo da janela.');
+      });
+
   void _setAutostart(bool enabled) {
     try {
       Autostart.set(enabled);
@@ -153,6 +163,12 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   _BrandHeader(version: widget.version),
                   const SizedBox(height: 14),
+                  ListenableBuilder(
+                    listenable: widget.updates,
+                    builder: (context, _) => widget.updates.available == null
+                        ? const SizedBox.shrink()
+                        : Padding(padding: const EdgeInsets.only(bottom: 12), child: _UpdateBanner(update: widget.updates.available!, current: widget.version)),
+                  ),
                   ListenableBuilder(listenable: service, builder: (context, _) => _StatusCard(status: service.status, version: widget.version, onKick: service.kick)),
                   const SizedBox(height: 12),
                   _connectionCard(),
@@ -360,6 +376,13 @@ class _HomePageState extends State<HomePage> {
                 value: _draft.insecureTls,
                 onChanged: (value) => setState(() => _draft = _draft.copyWith(insecureTls: value)),
               ),
+              if (widget.updates.enabled)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Atualizações'),
+                  subtitle: Text(_updateMessage ?? 'Versão ${widget.version}. O terminal confere sozinho se saiu versão nova.'),
+                  trailing: OutlinedButton(onPressed: _busy ? null : _checkUpdates, child: const Text('Procurar agora')),
+                ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Pasta de configuração e log'),
@@ -598,6 +621,72 @@ class _BrandHeader extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _UpdateBanner extends StatelessWidget {
+  const _UpdateBanner({required this.update, required this.current});
+
+  final AvailableUpdate update;
+  final String current;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = PertoColors.of(context);
+    final notes = update.notes
+        .split('\n')
+        .map((line) => line.replaceFirst(RegExp(r'^[#*\-\s]+'), '').trim())
+        .where((line) => line.isNotEmpty && !line.startsWith('Full Changelog') && !line.startsWith("What's Changed"))
+        .take(3)
+        .toList();
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.greenSoft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colors.green.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.system_update_alt, color: colors.green),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Nova versão ${update.version} disponível', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700, color: colors.ink)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('Você está na $current. Baixe, feche este terminal pela bandeja (Sair) e abra o novo na mesma pasta: a configuração continua a mesma.',
+              style: theme.textTheme.bodySmall?.copyWith(color: colors.muted)),
+          if (notes.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            for (final note in notes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text('• $note', style: theme.textTheme.bodySmall?.copyWith(color: colors.ink), maxLines: 2, overflow: TextOverflow.ellipsis),
+              ),
+          ],
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: () => openInBrowser(update.downloadUrl ?? update.pageUrl),
+                icon: const Icon(Icons.download, size: 18),
+                label: const Text('Baixar agora'),
+              ),
+              OutlinedButton(onPressed: () => openInBrowser(update.pageUrl), child: const Text('Como instalar')),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

@@ -110,7 +110,7 @@ Feito em Flutter (Windows e Linux). Cada tag `vX.Y.Z` enviada ao GitHub roda os 
 ```bash
 flutter test
 flutter run -d windows
-git tag v1.1.0 && git push origin v1.1.0
+git tag -a v1.1.0 -m "Novo: aviso quando sai versão nova do terminal."   # a mensagem vira as novidades no site`ngit push origin v1.1.0
 ```
 
 Os testes em `test/ticket_test.dart` comparam byte a byte com os cupons gerados pela primeira versão do terminal, em `test/fixtures`.
