@@ -79,7 +79,7 @@ class RealtimeClient {
     try {
       socket = await WebSocket.connect(uri.toString(), customClient: client).timeout(const Duration(seconds: 15));
     } catch (error) {
-      throw RealtimeException('tempo real indisponível: $error');
+      throw RealtimeException('tempo real indisponível em ${uri.scheme}://${uri.host}:${uri.port}: $error');
     }
     _socket = socket;
 

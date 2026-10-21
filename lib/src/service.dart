@@ -151,6 +151,7 @@ class TerminalService extends ChangeNotifier {
 
     final realtime = me.realtime;
     if (realtime != null && me.channel.isNotEmpty) {
+      log('tempo real: conectando em ${realtime.uri.scheme}://${realtime.uri.host}:${realtime.uri.port}${realtime.uri.path}');
       _realtime = RealtimeClient(
         uri: realtime.uri,
         channel: me.channel,
