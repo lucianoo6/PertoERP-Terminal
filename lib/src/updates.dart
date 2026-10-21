@@ -83,7 +83,7 @@ class UpdateChecker extends ChangeNotifier {
       final request = await client.getUrl(Uri.parse('$apiBase/repos/$repository/releases/latest'));
       request.headers
         ..set(HttpHeaders.acceptHeader, 'application/vnd.github+json')
-        ..set(HttpHeaders.userAgentHeader, 'PertoTerminal/$currentVersion');
+        ..set(HttpHeaders.userAgentHeader, 'PertoTerminal/$currentVersion (${Platform.operatingSystem})');
 
       final response = await request.close().timeout(const Duration(seconds: 15));
       final body = await response.transform(utf8.decoder).join();

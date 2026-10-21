@@ -14,6 +14,7 @@ class Payload {
     this.payments = const [],
     this.fiscal,
     this.footer = const Footer(),
+    this.lines = const [],
   });
 
   factory Payload.fromJson(Map<String, dynamic> json) => Payload(
@@ -26,6 +27,7 @@ class Payload {
         payments: _list(json['payments']).map((payment) => Payment.fromJson(_map(payment))).toList(),
         fiscal: json['fiscal'] is Map ? Fiscal.fromJson(_map(json['fiscal'])) : null,
         footer: Footer.fromJson(_map(json['footer'])),
+        lines: _list(json['lines']).map((line) => ReportLine.fromJson(_map(line))).toList(),
       );
 
   final int version;
@@ -38,8 +40,32 @@ class Payload {
   final Fiscal? fiscal;
   final Footer footer;
 
+  /// Linhas livres de um relatório (fechamento de caixa e outros), quando document_type é "report".
+  final List<ReportLine> lines;
+
+  bool get isReport => documentType == 'report';
+
   /// Só imprime como DANFE NFC-e quando há nota e o conteúdo do QR Code.
   bool get isDanfe => fiscal != null && fiscal!.key.isNotEmpty;
+}
+
+/// Uma linha de relatório: texto à esquerda, valor à direita (opcional) e um estilo.
+class ReportLine {
+  const ReportLine({this.text = '', this.right = '', this.bold = false, this.align = 'left', this.style = ''});
+
+  factory ReportLine.fromJson(Map<String, dynamic> json) => ReportLine(
+        text: _str(json['text']),
+        right: _str(json['right']),
+        bold: json['bold'] == true,
+        align: _str(json['align']).isEmpty ? 'left' : _str(json['align']),
+        style: _str(json['style']),
+      );
+
+  final String text, right, align;
+  final bool bold;
+
+  /// rule (traço), space (linha em branco), signature (linha para assinar), small (fonte menor) ou vazio.
+  final String style;
 }
 
 class Header {
@@ -198,6 +224,10 @@ class _Layout {
   final int cols;
 
   Uint8List render(Payload p, RenderOptions options) {
+    if (p.isReport) {
+      return report(p, options);
+    }
+
     if (options.openDrawer && p.payments.any((payment) => payment.method.toUpperCase().contains('DINHEIRO'))) {
       w.openDrawer();
     }
@@ -223,6 +253,52 @@ class _Layout {
 
     footer(p);
 
+    w.feed(4);
+    if (options.cut) {
+      w.cut();
+    }
+
+    return w.bytes();
+  }
+
+  /// Relatório (ex.: fechamento de caixa): cabeçalho da loja, título, data e as linhas livres.
+  Uint8List report(Payload p, RenderOptions options) {
+    header(p);
+    center(true, wrap(p.header.title.isEmpty ? 'RELATÓRIO' : p.header.title, cols));
+    if (p.header.dateTime.isNotEmpty) {
+      center(false, ['Emitido em ${p.header.dateTime}']);
+    }
+    rule();
+
+    for (final line in p.lines) {
+      switch (line.style) {
+        case 'rule':
+          rule();
+        case 'space':
+          w.feed(1);
+        case 'signature':
+          w.feed(3);
+          center(false, ['_' * (cols * 2 ~/ 3), if (line.text.isNotEmpty) line.text]);
+        default:
+          w.align(line.align == 'center' ? EscAlign.center : EscAlign.left).bold(line.bold);
+          if (line.style == 'small') {
+            w.condensed(true);
+          }
+          if (line.right.isNotEmpty) {
+            w.line(columns(line.text, line.right, cols));
+          } else {
+            for (final part in wrap(line.text, cols)) {
+              w.line(part);
+            }
+          }
+          if (line.style == 'small') {
+            w.condensed(false);
+          }
+          w.bold(false).align(EscAlign.left);
+      }
+    }
+
+    footer(p);
     w.feed(4);
     if (options.cut) {
       w.cut();

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'version.dart' as version;
+
 /// Token inválido, revogado ou terminal desativado no painel.
 class UnauthorizedException implements Exception {
   @override
@@ -52,7 +54,7 @@ class ApiClient {
       : base = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
         http = HttpClient()
           ..connectionTimeout = const Duration(seconds: 15)
-          ..userAgent = 'PertoTerminal-Flutter' {
+          ..userAgent = version.userAgent {
     if (insecureTls) {
       http.badCertificateCallback = (_, _, _) => true;
     }

@@ -9,11 +9,10 @@ import 'package:windows_single_instance/windows_single_instance.dart';
 import 'src/config.dart';
 import 'src/service.dart';
 import 'src/updates.dart';
+import 'src/version.dart';
 import 'ui/home_page.dart';
 import 'ui/theme.dart';
 
-/// Preenchida pelo build do GitHub a partir da tag (ex.: v1.2.0 → 1.2.0).
-const appVersion = String.fromEnvironment('APP_VERSION', defaultValue: 'dev');
 
 /// Perto Terminal (Flutter): fica na bandeja e imprime na térmica os cupons e DANFEs NFC-e enviados pelo PertoERP.
 Future<void> main(List<String> args) async {
