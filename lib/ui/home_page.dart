@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../src/config.dart';
@@ -9,6 +10,8 @@ import '../src/printer.dart';
 import '../src/service.dart';
 import '../main.dart' show installUpdate;
 import '../src/updates.dart';
+import '../src/version.dart';
+import '../src/api.dart';
 import '../src/autostart.dart';
 import 'theme.dart';
 
@@ -28,6 +31,8 @@ class _HomePageState extends State<HomePage> {
   late TerminalConfig _draft;
   late final TextEditingController _server;
   late final TextEditingController _token;
+  final TextEditingController _code = TextEditingController();
+  bool _enteringCode = false;
   late final TextEditingController _address;
   late final TextEditingController _path;
 
@@ -57,6 +62,7 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _server.dispose();
     _token.dispose();
+    _code.dispose();
     _address.dispose();
     _path.dispose();
     super.dispose();
@@ -120,10 +126,69 @@ class _HomePageState extends State<HomePage> {
         }
       });
 
+  /// Troca o código do painel pelo token e já salva: o lojista nunca vê nem copia o token.
+  Future<void> _pair() => _run(() async {
+        final code = _code.text.replaceAll(RegExp(r'\D'), '');
+        if (code.length != 6) {
+          _toast('Digite os 6 números que aparecem no PertoERP.', error: true);
+          return;
+        }
+
+        try {
+          final base = _current.normalized();
+          final pairing = await ApiClient.pair(base.serverUrl, code, insecureTls: base.insecureTls);
+          final config = base.copyWith(token: pairing.token);
+
+          await service.apply(config);
+          setState(() {
+            _draft = config;
+            _token.text = pairing.token;
+            _code.clear();
+            _enteringCode = false;
+            _checkOk = true;
+            _checkMessage = 'Conectado como "${pairing.name}" · fila "${pairing.printerName}"';
+          });
+          _toast(config.printerReady ? 'Computador conectado. Já pode imprimir.' : 'Computador conectado. Agora escolha a impressora abaixo.');
+        } catch (error) {
+          setState(() {
+            _checkOk = false;
+            _checkMessage = '$error';
+          });
+        }
+      });
+
+  Future<void> _disconnect() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Desconectar este computador?'),
+        content: const Text('Ele para de imprimir as vendas do PertoERP até ser conectado de novo com um código.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Desconectar')),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    await _run(() async {
+      final config = _current.copyWith(token: '').normalized();
+      await service.apply(config);
+      setState(() {
+        _draft = config;
+        _token.clear();
+        _checkMessage = null;
+      });
+    });
+  }
+
   Future<void> _save() => _run(() async {
         final config = _current.normalized();
-        if (config.serverUrl.isEmpty || config.token.isEmpty) {
-          _toast('Informe o endereço do PertoERP e o token do terminal.', error: true);
+        if (config.token.isEmpty) {
+          _toast('Conecte este computador com o código do PertoERP.', error: true);
           return;
         }
         if (!config.printerReady) {
@@ -195,22 +260,30 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _connectionCard() => _Section(
-        icon: Icons.cloud_outlined,
-        title: 'Conexão com o PertoERP',
-        subtitle: 'O token aparece ao cadastrar o terminal em Configurações › Terminais de impressão.',
-        children: [
+  Widget _connectionCard() {
+    final paired = _token.text.trim().isNotEmpty && !_enteringCode;
+    final theme = Theme.of(context);
+
+    return _Section(
+      icon: Icons.link,
+      title: 'Conexão com o PertoERP',
+      subtitle: paired
+          ? null
+          : 'No PertoERP, abra Configurações › Terminais de impressão, escolha este computador e clique em "Conectar computador". Digite aqui o código que aparecer.',
+      children: [
+        if (isDevBuild) ...[
           TextField(
             controller: _server,
-            decoration: const InputDecoration(labelText: 'Endereço do PertoERP', hintText: 'https://pertoerp.com.br'),
+            decoration: const InputDecoration(labelText: 'Endereço (só no modo de desenvolvimento)', hintText: 'https://pertoerp.test'),
             keyboardType: TextInputType.url,
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _token,
             obscureText: !_tokenVisible,
+            onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
-              labelText: 'Token do terminal',
+              labelText: 'Token (só no modo de desenvolvimento)',
               suffixIcon: IconButton(
                 tooltip: _tokenVisible ? 'Esconder' : 'Mostrar',
                 icon: Icon(_tokenVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined),
@@ -219,24 +292,77 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(height: 12),
+        ],
+        if (!paired) ...[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _code,
+                  autofocus: true,
+                  textAlign: TextAlign.center,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+                  style: theme.textTheme.headlineSmall?.copyWith(letterSpacing: 10, fontWeight: FontWeight.w700),
+                  decoration: const InputDecoration(labelText: 'Código de 6 números', hintText: '000000', counterText: ''),
+                  onSubmitted: (_) => _pair(),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                height: 56,
+                child: FilledButton.icon(onPressed: _busy ? null : _pair, icon: const Icon(Icons.link, size: 18), label: const Text('Conectar')),
+              ),
+            ],
+          ),
+          if (_token.text.trim().isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(onPressed: () => setState(() => _enteringCode = false), child: const Text('Cancelar e manter a conexão atual')),
+            ),
+        ] else
           Row(
             children: [
-              OutlinedButton.icon(onPressed: _busy ? null : _check, icon: const Icon(Icons.wifi_tethering, size: 18), label: const Text('Testar conexão')),
-              const SizedBox(width: 12),
-              if (_checkMessage != null)
-                Expanded(
-                  child: Row(
-                    children: [
-                      Icon(_checkOk ? Icons.check_circle : Icons.error_outline, size: 18, color: _checkOk ? PertoColors.of(context).green : const Color(0xFFDC2626)),
-                      const SizedBox(width: 6),
-                      Expanded(child: Text(_checkMessage!, style: Theme.of(context).textTheme.bodySmall, maxLines: 3, overflow: TextOverflow.ellipsis)),
-                    ],
+              Icon(Icons.check_circle, color: PertoColors.of(context).green, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: service,
+                  builder: (context, _) => Text(
+                    service.status.device.isEmpty ? 'Este computador está conectado ao PertoERP.' : 'Conectado como "${service.status.device}" · fila "${service.status.printerName}"',
+                    style: theme.textTheme.bodyMedium,
                   ),
                 ),
+              ),
+            ],
+          ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (paired) ...[
+              OutlinedButton.icon(onPressed: _busy ? null : _check, icon: const Icon(Icons.wifi_tethering, size: 18), label: const Text('Testar conexão')),
+              OutlinedButton(onPressed: _busy ? null : () => setState(() => _enteringCode = true), child: const Text('Conectar com outro código')),
+              TextButton(onPressed: _busy ? null : _disconnect, child: const Text('Desconectar')),
+            ],
+          ],
+        ),
+        if (_checkMessage != null) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(_checkOk ? Icons.check_circle : Icons.error_outline, size: 18, color: _checkOk ? PertoColors.of(context).green : const Color(0xFFDC2626)),
+              const SizedBox(width: 6),
+              Expanded(child: Text(_checkMessage!, style: theme.textTheme.bodySmall, maxLines: 3, overflow: TextOverflow.ellipsis)),
             ],
           ),
         ],
-      );
+      ],
+    );
+  }
 
   Widget _printerCard() {
     final theme = Theme.of(context);
@@ -378,7 +504,8 @@ class _HomePageState extends State<HomePage> {
                   value: _autostart,
                   onChanged: _setAutostart,
                 ),
-              SwitchListTile(
+              if (isDevBuild)
+                SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Aceitar certificado de teste'),
                 subtitle: const Text('Só para servidor local (.test). Deixe desligado no dia a dia.'),

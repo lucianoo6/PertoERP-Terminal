@@ -48,6 +48,15 @@ class Job {
   final Map<String, dynamic> payload;
 }
 
+/// Resultado do pareamento: o token do terminal e como ele está cadastrado no PertoERP.
+class Pairing {
+  Pairing({required this.token, required this.name, required this.printerName});
+
+  final String token;
+  final String name;
+  final String printerName;
+}
+
 /// Fala com o PertoERP: /api/v1/terminal (fila de impressão) e /api/broadcasting/auth (canal privado).
 class ApiClient {
   ApiClient(String baseUrl, this.token, {bool insecureTls = false})
@@ -63,6 +72,19 @@ class ApiClient {
   final String base;
   final String token;
   final HttpClient http;
+
+  /// Troca o código de 6 dígitos mostrado no painel pelo token deste terminal (não precisa de token antes).
+  static Future<Pairing> pair(String baseUrl, String code, {bool insecureTls = false}) async {
+    final client = ApiClient(baseUrl, '', insecureTls: insecureTls);
+
+    try {
+      final json = await client._request('POST', '/api/v1/terminal/pair', body: jsonEncode({'code': code}), contentType: 'application/json') as Map<String, dynamic>;
+
+      return Pairing(token: '${json['token']}', name: '${json['name'] ?? ''}', printerName: '${json['printer_name'] ?? ''}');
+    } finally {
+      client.close();
+    }
+  }
 
   Future<Me> me() async {
     final json = await _request('GET', '/api/v1/terminal/me') as Map<String, dynamic>;
@@ -135,12 +157,19 @@ class ApiClient {
   Future<Object?> _request(String method, String path, {String? body, String? contentType}) async {
     final HttpClientResponse response;
     final String text;
+    final uri = Uri.tryParse('$base$path');
+
+    // O token nunca vai por conexão sem criptografia (exceto no próprio computador ou em .test, para desenvolvimento).
+    if (uri == null || (uri.scheme != 'https' && !(uri.host == 'localhost' || uri.host == '127.0.0.1' || uri.host.endsWith('.test')))) {
+      throw ApiException('endereço inseguro: o PertoERP só é acessado por https');
+    }
 
     try {
-      final request = await http.openUrl(method, Uri.parse('$base$path'));
-      request.headers
-        ..set(HttpHeaders.authorizationHeader, 'Bearer $token')
-        ..set(HttpHeaders.acceptHeader, 'application/json');
+      final request = await http.openUrl(method, uri);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      if (token.isNotEmpty) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
       if (contentType != null) {
         request.headers.set(HttpHeaders.contentTypeHeader, contentType);
       }
@@ -163,6 +192,12 @@ class ApiClient {
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw UnauthorizedException();
     }
+    if (response.statusCode == 429) {
+      throw ApiException('muitas tentativas seguidas. Espere 1 minuto e tente de novo');
+    }
+    if (response.statusCode == 422) {
+      throw ApiException(_message(text) ?? 'dados recusados pelo PertoERP');
+    }
     if (response.statusCode >= 300) {
       throw ApiException('servidor respondeu ${response.statusCode}: ${_snippet(text)}');
     }
@@ -174,6 +209,16 @@ class ApiClient {
       return jsonDecode(text);
     } on FormatException {
       throw ApiException('resposta inesperada do servidor (é o endereço do PertoERP?): ${_snippet(text)}');
+    }
+  }
+
+  String? _message(String text) {
+    try {
+      final json = jsonDecode(text);
+
+      return json is Map && json['message'] is String ? json['message'] as String : null;
+    } on FormatException {
+      return null;
     }
   }
 

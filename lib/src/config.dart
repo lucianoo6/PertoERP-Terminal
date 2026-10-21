@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'version.dart';
 import 'win_native.dart' as win;
 
 /// Para onde vão os bytes ESC/POS.
@@ -82,11 +83,15 @@ class TerminalConfig {
         PrinterKind.file => printerPath.isNotEmpty,
       };
 
+  /// Outro endereço e certificado de teste só no build de desenvolvimento (os testes também ligam).
+  static bool allowCustomServer = isDevBuild;
+
   /// Já dá para falar com o servidor e imprimir.
   bool get configured => serverUrl.isNotEmpty && token.isNotEmpty && printerReady;
 
   TerminalConfig normalized() => copyWith(
-        serverUrl: serverUrl.trim().replaceFirst(RegExp(r'/+$'), ''),
+        serverUrl: allowCustomServer && serverUrl.trim().isNotEmpty ? serverUrl.trim().replaceFirst(RegExp(r'/+$'), '') : officialServer,
+        insecureTls: allowCustomServer && insecureTls,
         token: token.trim(),
         columns: columns < 24 || columns > 64 ? 48 : columns,
         codePage: codePage.isEmpty ? 'cp850' : codePage,
@@ -162,12 +167,12 @@ class TerminalConfig {
   static TerminalConfig load() {
     try {
       if (!file.existsSync()) {
-        return const TerminalConfig();
+        return const TerminalConfig().normalized();
       }
 
       return TerminalConfig.fromJson(jsonDecode(file.readAsStringSync()) as Map<String, dynamic>);
     } catch (_) {
-      return const TerminalConfig();
+      return const TerminalConfig().normalized();
     }
   }
 
