@@ -9,7 +9,7 @@ typedef Authorizer = Future<String> Function(String socketId, String channel);
 class RealtimeClient {
   RealtimeClient({
     required this.uri,
-    required this.channel,
+    required this.channels,
     required this.authorize,
     required this.onEvent,
     required this.onState,
@@ -17,7 +17,8 @@ class RealtimeClient {
   });
 
   final Uri uri;
-  final String channel;
+  /// Um canal por fila deste computador (caixa, cozinha, bar…), todos na mesma conexão.
+  final List<String> channels;
   final Authorizer authorize;
   final void Function(String event) onEvent;
   final void Function(bool connected, Object? error) onState;
@@ -103,11 +104,14 @@ class RealtimeClient {
         activity = const Duration(seconds: 30);
       }
 
-      final auth = await authorize(socketId, channel);
-      socket.add(jsonEncode({
-        'event': 'pusher:subscribe',
-        'data': {'auth': auth, 'channel': channel},
-      }));
+      for (final channel in channels) {
+        final auth = await authorize(socketId, channel);
+        socket.add(jsonEncode({
+          'event': 'pusher:subscribe',
+          'data': {'auth': auth, 'channel': channel},
+        }));
+      }
+      final subscribed = <String>{};
 
       var waitingPong = false;
       Object? failure;
@@ -136,7 +140,11 @@ class RealtimeClient {
 
         switch (message['event']) {
           case 'pusher_internal:subscription_succeeded':
-            onState(true, null);
+            // Conectado de verdade só quando todas as filas deste computador estão assinadas.
+            subscribed.add('${message['channel']}');
+            if (subscribed.containsAll(channels)) {
+              onState(true, null);
+            }
           case 'pusher:ping':
             socket.add(jsonEncode({'event': 'pusher:pong', 'data': {}}));
           case 'pusher:pong':
@@ -144,7 +152,7 @@ class RealtimeClient {
           case 'pusher:error':
             throw RealtimeException('Reverb recusou: ${jsonEncode(message['data'])}');
           default:
-            if (message['channel'] == channel) {
+            if (channels.contains(message['channel'])) {
               onEvent('${message['event']}');
             }
         }

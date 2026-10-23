@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 import '../src/config.dart';
 import '../src/escpos.dart';
 import '../src/printer.dart';
+import '../src/printer_settings.dart';
 import '../src/service.dart';
 import '../main.dart' show installUpdate;
 import '../src/updates.dart';
@@ -33,8 +34,6 @@ class _HomePageState extends State<HomePage> {
   late final TextEditingController _token;
   final TextEditingController _code = TextEditingController();
   bool _enteringCode = false;
-  late final TextEditingController _address;
-  late final TextEditingController _path;
 
   List<String> _printers = [];
   bool _tokenVisible = false;
@@ -52,8 +51,6 @@ class _HomePageState extends State<HomePage> {
     _draft = service.config;
     _server = TextEditingController(text: _draft.serverUrl.isEmpty ? 'https://pertoerp.com.br' : _draft.serverUrl);
     _token = TextEditingController(text: _draft.token);
-    _address = TextEditingController(text: _draft.printerAddress);
-    _path = TextEditingController(text: _draft.printerPath);
     _loadPrinters();
     _autostart = Autostart.supported && Autostart.enabled;
   }
@@ -63,8 +60,6 @@ class _HomePageState extends State<HomePage> {
     _server.dispose();
     _token.dispose();
     _code.dispose();
-    _address.dispose();
-    _path.dispose();
     super.dispose();
   }
 
@@ -80,8 +75,6 @@ class _HomePageState extends State<HomePage> {
   TerminalConfig get _current => _draft.copyWith(
         serverUrl: _server.text,
         token: _token.text,
-        printerAddress: _address.text,
-        printerPath: _path.text,
         appearance: service.config.appearance,
       );
 
@@ -117,9 +110,9 @@ class _HomePageState extends State<HomePage> {
         }
       });
 
-  Future<void> _testPrint() => _run(() async {
+  Future<void> _testPrint([PrinterSettings? printer]) => _run(() async {
         try {
-          await service.testPrint(_current);
+          await service.testPrint(printer == null ? _current : _current.withMainPrinter(printer));
           _toast('Página de teste enviada. Confira acentos, largura e QR Code.');
         } catch (error) {
           _toast('$error', error: true);
@@ -364,12 +357,63 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _printerCard() {
+  Widget _printerCard() => ListenableBuilder(
+        listenable: service,
+        builder: (context, _) {
+          final status = service.status;
+          final extraQueues = status.queues.where((queue) => queue != status.printerName).toList();
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _printerEditor(
+                key: 'main',
+                title: extraQueues.isEmpty ? 'Impressora térmica' : 'Impressora ${_queueLabel(status.printerName)}',
+                subtitle: extraQueues.isEmpty ? null : 'Fila principal deste computador ("${status.printerName}").',
+                value: _draft.mainPrinter,
+                onChanged: (printer) => setState(() => _draft = _draft.withMainPrinter(printer)),
+              ),
+              for (final queue in extraQueues) ...[
+                const SizedBox(height: 12),
+                _printerEditor(
+                  key: queue,
+                  title: 'Impressora ${_queueLabel(queue)}',
+                  subtitle: status.queuesWithoutPrinter.contains(queue)
+                      ? 'Escolha a impressora e salve: os pedidos da fila "$queue" ficam esperando até lá.'
+                      : 'Fila "$queue" do PertoERP, ligada neste computador.',
+                  warning: status.queuesWithoutPrinter.contains(queue),
+                  value: _draft.extraPrinters[queue] ?? const PrinterSettings(),
+                  onChanged: (printer) => setState(() => _draft = _draft.withExtraPrinter(queue, printer)),
+                  showDrawer: false,
+                ),
+              ],
+            ],
+          );
+        },
+      );
+
+  /// "cozinha" → "da cozinha", "copa-2" → "da copa 2" (para os títulos dos blocos).
+  String _queueLabel(String queue) {
+    final name = queue.replaceAll('-', ' ').trim();
+
+    return name.isEmpty ? '' : 'da ${name[0].toLowerCase()}${name.substring(1)}';
+  }
+
+  Widget _printerEditor({
+    required String key,
+    required String title,
+    String? subtitle,
+    bool warning = false,
+    required PrinterSettings value,
+    required ValueChanged<PrinterSettings> onChanged,
+    bool showDrawer = true,
+  }) {
     final theme = Theme.of(context);
 
     return _Section(
-      icon: Icons.print_outlined,
-      title: 'Impressora térmica',
+      icon: warning ? Icons.warning_amber_rounded : Icons.print_outlined,
+      title: title,
+      subtitle: subtitle,
       children: [
         SegmentedButton<PrinterKind>(
           showSelectedIcon: false,
@@ -378,35 +422,40 @@ class _HomePageState extends State<HomePage> {
             ButtonSegment(value: PrinterKind.network, label: Text('Rede (IP)'), icon: Icon(Icons.lan_outlined, size: 18)),
             ButtonSegment(value: PrinterKind.file, label: Text('Porta'), icon: Icon(Icons.cable, size: 18)),
           ],
-          selected: {_draft.printerKind},
-          onSelectionChanged: (selection) => setState(() => _draft = _draft.copyWith(printerKind: selection.first)),
+          selected: {value.kind},
+          onSelectionChanged: (selection) => onChanged(value.copyWith(kind: selection.first)),
         ),
         const SizedBox(height: 12),
-        switch (_draft.printerKind) {
+        switch (value.kind) {
           PrinterKind.windows => Row(
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    initialValue: _printers.contains(_draft.printerName) ? _draft.printerName : null,
+                    key: ValueKey('$key-name-${_printers.length}'),
+                    initialValue: _printers.contains(value.name) ? value.name : null,
                     isExpanded: true,
                     decoration: InputDecoration(
                       labelText: Platform.isWindows ? 'Impressora instalada no Windows' : 'Impressora instalada (CUPS)',
                       helperText: _printers.isEmpty ? 'Nenhuma impressora instalada. Instale o driver da térmica e clique em atualizar.' : null,
                     ),
                     items: [for (final name in _printers) DropdownMenuItem(value: name, child: Text(name, overflow: TextOverflow.ellipsis))],
-                    onChanged: (name) => setState(() => _draft = _draft.copyWith(printerName: name ?? '')),
+                    onChanged: (name) => onChanged(value.copyWith(name: name ?? '')),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton.outlined(tooltip: 'Atualizar lista', onPressed: _loadPrinters, icon: const Icon(Icons.refresh)),
               ],
             ),
-          PrinterKind.network => TextField(
-              controller: _address,
+          PrinterKind.network => TextFormField(
+              key: ValueKey('$key-address'),
+              initialValue: value.address,
+              onChanged: (address) => onChanged(value.copyWith(address: address.trim())),
               decoration: const InputDecoration(labelText: 'IP da impressora', hintText: '192.168.0.50 (porta 9100)'),
             ),
-          PrinterKind.file => TextField(
-              controller: _path,
+          PrinterKind.file => TextFormField(
+              key: ValueKey('$key-path'),
+              initialValue: value.path,
+              onChanged: (path) => onChanged(value.copyWith(path: path.trim())),
               decoration: InputDecoration(labelText: 'Porta ou arquivo', hintText: Platform.isWindows ? r'Ex.: COM3, LPT1 ou \\computador\termica' : 'Ex.: /dev/usb/lp0'),
             ),
         },
@@ -419,12 +468,13 @@ class _HomePageState extends State<HomePage> {
             ButtonSegment(value: 48, label: Text('80 mm')),
             ButtonSegment(value: 32, label: Text('58 mm')),
           ],
-          selected: {_draft.columns == 32 ? 32 : 48},
-          onSelectionChanged: (selection) => setState(() => _draft = _draft.copyWith(columns: selection.first)),
+          selected: {value.columns == 32 ? 32 : 48},
+          onSelectionChanged: (selection) => onChanged(value.copyWith(columns: selection.first)),
         ),
         const SizedBox(height: 16),
         DropdownButtonFormField<String>(
-          initialValue: EscPos.codePages.contains(_draft.codePage) ? _draft.codePage : 'cp850',
+          key: ValueKey('$key-codepage'),
+          initialValue: EscPos.codePages.contains(value.codePage) ? value.codePage : 'cp850',
           decoration: const InputDecoration(labelText: 'Tabela de acentos', helperText: 'Se os acentos saírem errados na página de teste, troque aqui.'),
           items: const [
             DropdownMenuItem(value: 'cp850', child: Text('CP850 (Elgin, Epson, Bematech - padrão)')),
@@ -432,39 +482,40 @@ class _HomePageState extends State<HomePage> {
             DropdownMenuItem(value: 'wpc1252', child: Text('Windows-1252')),
             DropdownMenuItem(value: 'ascii', child: Text('Sem acentos')),
           ],
-          onChanged: (page) => setState(() => _draft = _draft.copyWith(codePage: page)),
+          onChanged: (page) => onChanged(value.copyWith(codePage: page)),
         ),
         const SizedBox(height: 8),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Cortar o papel no fim'),
-          value: _draft.cut,
-          onChanged: (value) => setState(() => _draft = _draft.copyWith(cut: value)),
+          value: value.cut,
+          onChanged: (cut) => onChanged(value.copyWith(cut: cut)),
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Abrir a gaveta em venda no dinheiro'),
-          subtitle: const Text('Gaveta ligada na impressora (RJ11).'),
-          value: _draft.openDrawer,
-          onChanged: (value) => setState(() => _draft = _draft.copyWith(openDrawer: value)),
-        ),
+        if (showDrawer)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Abrir a gaveta em venda no dinheiro'),
+            subtitle: const Text('Gaveta ligada na impressora (RJ11).'),
+            value: value.openDrawer,
+            onChanged: (openDrawer) => onChanged(value.copyWith(openDrawer: openDrawer)),
+          ),
         Row(
           children: [
             const Expanded(child: Text('Vias de cada cupom')),
             IconButton.outlined(
-              onPressed: _draft.copies > 1 ? () => setState(() => _draft = _draft.copyWith(copies: _draft.copies - 1)) : null,
+              onPressed: value.copies > 1 ? () => onChanged(value.copyWith(copies: value.copies - 1)) : null,
               icon: const Icon(Icons.remove, size: 18),
             ),
-            SizedBox(width: 40, child: Text('${_draft.copies}', textAlign: TextAlign.center, style: theme.textTheme.titleMedium)),
+            SizedBox(width: 40, child: Text('${value.copies}', textAlign: TextAlign.center, style: theme.textTheme.titleMedium)),
             IconButton.outlined(
-              onPressed: _draft.copies < 5 ? () => setState(() => _draft = _draft.copyWith(copies: _draft.copies + 1)) : null,
+              onPressed: value.copies < 5 ? () => onChanged(value.copyWith(copies: value.copies + 1)) : null,
               icon: const Icon(Icons.add, size: 18),
             ),
           ],
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: _busy ? null : _testPrint,
+          onPressed: _busy || !value.ready ? null : () => _testPrint(value),
           icon: const Icon(Icons.receipt_long_outlined, size: 18),
           label: const Text('Imprimir página de teste'),
         ),

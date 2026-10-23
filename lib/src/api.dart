@@ -33,12 +33,34 @@ class RealtimeInfo {
 }
 
 class Me {
-  Me({required this.name, required this.printerName, required this.channel, this.realtime});
+  Me({required this.name, required this.printerName, required this.channel, this.realtime, List<String>? queues, Map<String, String>? channels})
+      : queues = queues == null || queues.isEmpty ? [printerName] : queues,
+        channels = channels ?? {};
 
   final String name;
+
+  /// Fila principal deste terminal.
   final String printerName;
   final String channel;
   final RealtimeInfo? realtime;
+
+  /// Todas as filas deste computador (a principal primeiro), ex.: [caixa, cozinha, bar].
+  final List<String> queues;
+
+  /// Canal de tempo real de cada fila. Servidores antigos não mandam: o nome segue o da fila principal.
+  final Map<String, String> channels;
+
+  String channelFor(String queue) {
+    final known = channels[queue];
+    if (known != null && known.isNotEmpty) {
+      return known;
+    }
+    if (queue == printerName || !channel.endsWith('.printer.$printerName')) {
+      return channel;
+    }
+
+    return '${channel.substring(0, channel.length - printerName.length)}$queue';
+  }
 }
 
 class Job {
@@ -94,6 +116,8 @@ class ApiClient {
       name: '${json['name'] ?? ''}',
       printerName: '${json['printer_name'] ?? ''}',
       channel: '${json['channel'] ?? ''}',
+      queues: (json['queues'] as List? ?? []).map((queue) => '$queue').where((queue) => queue.isNotEmpty).toList(),
+      channels: json['channels'] is Map ? (json['channels'] as Map).map((key, value) => MapEntry('$key', '$value')) : null,
       realtime: realtime is Map && '${realtime['key'] ?? ''}'.isNotEmpty
           ? RealtimeInfo(
               key: '${realtime['key']}',
@@ -105,8 +129,10 @@ class ApiClient {
     );
   }
 
-  Future<List<Job>> pendingJobs() async {
-    final json = await _request('GET', '/api/v1/terminal/jobs') as Map<String, dynamic>;
+  /// Trabalhos pendentes de uma fila (sem fila: a principal do terminal).
+  Future<List<Job>> pendingJobs({String? queue}) async {
+    final path = queue == null || queue.isEmpty ? '/api/v1/terminal/jobs' : '/api/v1/terminal/jobs?printer=${Uri.encodeQueryComponent(queue)}';
+    final json = await _request('GET', path) as Map<String, dynamic>;
 
     return [
       for (final job in (json['data'] as List? ?? []).cast<Map<String, dynamic>>())

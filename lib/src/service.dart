@@ -21,6 +21,8 @@ class TerminalStatus {
     this.lastError = '',
     this.lastPrintAt,
     this.printed = 0,
+    this.queues = const [],
+    this.queuesWithoutPrinter = const [],
   });
 
   final bool configured;
@@ -38,15 +40,33 @@ class TerminalStatus {
   final DateTime? lastPrintAt;
   final int printed;
 
+  /// Filas deste computador (a principal primeiro), como o PertoERP informa.
+  final List<String> queues;
+
+  /// Filas extras ainda sem impressora escolhida neste computador: os pedidos delas ficam esperando.
+  final List<String> queuesWithoutPrinter;
+
   Health get health => switch (this) {
         TerminalStatus(configured: false) => Health.setup,
         TerminalStatus(connected: false) => Health.error,
         _ when lastError.isNotEmpty => Health.error,
+        _ when queuesWithoutPrinter.isNotEmpty => Health.degraded,
         TerminalStatus(realtime: false) => Health.degraded,
         _ => Health.ok,
       };
 
-  TerminalStatus copyWith({bool? configured, bool? connected, bool? realtime, String? device, String? printerName, String? lastError, DateTime? lastPrintAt, int? printed}) =>
+  TerminalStatus copyWith({
+    bool? configured,
+    bool? connected,
+    bool? realtime,
+    String? device,
+    String? printerName,
+    String? lastError,
+    DateTime? lastPrintAt,
+    int? printed,
+    List<String>? queues,
+    List<String>? queuesWithoutPrinter,
+  }) =>
       TerminalStatus(
         configured: configured ?? this.configured,
         connected: connected ?? this.connected,
@@ -56,6 +76,8 @@ class TerminalStatus {
         lastError: lastError ?? this.lastError,
         lastPrintAt: lastPrintAt ?? this.lastPrintAt,
         printed: printed ?? this.printed,
+        queues: queues ?? this.queues,
+        queuesWithoutPrinter: queuesWithoutPrinter ?? this.queuesWithoutPrinter,
       );
 }
 
@@ -128,7 +150,7 @@ class TerminalService extends ChangeNotifier {
     await stop();
     final generation = _generation;
 
-    _status = TerminalStatus(configured: _config.configured, printed: _status.printed, lastPrintAt: _status.lastPrintAt);
+    _status = TerminalStatus(configured: _config.configured, printed: _status.printed, lastPrintAt: _status.lastPrintAt, queues: _status.queues);
     notifyListeners();
 
     if (!_config.configured) {
@@ -150,11 +172,12 @@ class TerminalService extends ChangeNotifier {
     }
 
     final realtime = me.realtime;
-    if (realtime != null && me.channel.isNotEmpty) {
+    final channels = me.queues.map(me.channelFor).where((channel) => channel.isNotEmpty).toSet().toList();
+    if (realtime != null && channels.isNotEmpty) {
       log('tempo real: conectando em ${realtime.uri.scheme}://${realtime.uri.host}:${realtime.uri.port}${realtime.uri.path}');
       _realtime = RealtimeClient(
         uri: realtime.uri,
-        channel: me.channel,
+        channels: channels,
         authorize: client.authorizeChannel,
         insecureTls: config.insecureTls,
         onEvent: (event) {
@@ -169,7 +192,7 @@ class TerminalService extends ChangeNotifier {
             log('tempo real: $error');
           }
           if (connected) {
-            log('tempo real: inscrito em ${me.channel}');
+            log('tempo real: inscrito em ${channels.join(', ')}');
           }
           _update((status) => status.copyWith(realtime: connected));
           if (connected) {
@@ -180,7 +203,7 @@ class TerminalService extends ChangeNotifier {
     }
 
     while (_alive(generation)) {
-      await _processPending(generation, client, config);
+      await _processPending(generation, client, config, me);
 
       // Com tempo real, a consulta é só uma garantia.
       final wait = _status.realtime ? const Duration(seconds: 60) : Duration(seconds: config.pollSeconds);
@@ -195,8 +218,15 @@ class TerminalService extends ChangeNotifier {
     while (_alive(generation)) {
       try {
         final me = await client.me();
-        log('conectado como "${me.name}" (fila "${me.printerName}")');
-        _update((status) => status.copyWith(connected: true, device: me.name, printerName: me.printerName, lastError: ''));
+        log('conectado como "${me.name}" (filas ${me.queues.map((queue) => '"$queue"').join(', ')})');
+        _update((status) => status.copyWith(
+              connected: true,
+              device: me.name,
+              printerName: me.printerName,
+              lastError: '',
+              queues: me.queues,
+              queuesWithoutPrinter: me.queues.where((queue) => _config.forQueue(queue, mainQueue: me.printerName) == null).toList(),
+            ));
 
         return me;
       } catch (error) {
@@ -218,26 +248,34 @@ class TerminalService extends ChangeNotifier {
     return null;
   }
 
-  Future<void> _processPending(int generation, ApiClient client, TerminalConfig config) async {
-    final List<Job> jobs;
-    try {
-      jobs = await client.pendingJobs();
-    } catch (error) {
-      if (_alive(generation)) {
-        log('fila: $error');
-        _update((status) => status.copyWith(connected: false, lastError: '$error'));
+  Future<void> _processPending(int generation, ApiClient client, TerminalConfig config, Me me) async {
+    for (final queue in me.queues) {
+      // Fila extra sem impressora escolhida: os pedidos ficam no PertoERP até alguém escolher a impressora.
+      final queueConfig = config.forQueue(queue, mainQueue: me.printerName);
+      if (queueConfig == null) {
+        continue;
       }
 
-      return;
-    }
+      final List<Job> jobs;
+      try {
+        jobs = await client.pendingJobs(queue: me.queues.length > 1 ? queue : null);
+      } catch (error) {
+        if (_alive(generation)) {
+          log('fila $queue: $error');
+          _update((status) => status.copyWith(connected: false, lastError: '$error'));
+        }
 
-    _update((status) => status.copyWith(connected: true, lastError: status.connected ? null : ''));
-
-    for (final job in jobs) {
-      if (!_alive(generation)) {
         return;
       }
-      await _handle(client, config, job);
+
+      _update((status) => status.copyWith(connected: true, lastError: status.connected ? null : ''));
+
+      for (final job in jobs) {
+        if (!_alive(generation)) {
+          return;
+        }
+        await _handle(client, queueConfig, job);
+      }
     }
 
     _done.removeWhere((_, at) => DateTime.now().difference(at) > const Duration(hours: 1));

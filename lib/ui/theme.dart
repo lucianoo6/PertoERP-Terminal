@@ -143,6 +143,7 @@ ThemeData buildTheme(Brightness brightness) {
 String statusTitle(TerminalStatus status) => switch (status.health) {
       Health.setup => 'Falta configurar',
       Health.ok => 'Pronto para imprimir',
+      Health.degraded when status.queuesWithoutPrinter.isNotEmpty => 'Falta escolher a impressora: ${status.queuesWithoutPrinter.join(', ')}',
       Health.degraded => 'Imprimindo (tempo real reconectando)',
       Health.error => status.connected ? 'Com problema na impressão' : 'Sem conexão com o PertoERP',
     };

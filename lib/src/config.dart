@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'printer_settings.dart';
 import 'version.dart';
 import 'win_native.dart' as win;
 
@@ -27,6 +28,7 @@ class TerminalConfig {
     this.insecureTls = false,
     this.pollSeconds = 5,
     this.appearance = Appearance.light,
+    this.extraPrinters = const {},
   });
 
   /// Mesmo formato de arquivo da versão em Go (o token vai cifrado pelo DPAPI).
@@ -48,6 +50,12 @@ class TerminalConfig {
       insecureTls: json['insecure_tls'] as bool? ?? false,
       pollSeconds: (json['poll_seconds'] as num?)?.toInt() ?? 5,
       appearance: Appearance.values.firstWhere((value) => value.name == json['appearance'], orElse: () => Appearance.light),
+      extraPrinters: json['extra_printers'] is Map
+          ? {
+              for (final entry in (json['extra_printers'] as Map).entries)
+                if (entry.value is Map) '${entry.key}': PrinterSettings.fromJson((entry.value as Map).cast<String, dynamic>()),
+            }
+          : const {},
     ).normalized();
   }
 
@@ -76,6 +84,49 @@ class TerminalConfig {
   final int pollSeconds;
 
   final Appearance appearance;
+
+  /// Outras impressoras deste computador, por fila do PertoERP (ex.: "cozinha", "bar").
+  /// A fila principal do terminal usa a impressora dos campos acima.
+  final Map<String, PrinterSettings> extraPrinters;
+
+  /// Impressora da fila principal, no mesmo formato das outras.
+  PrinterSettings get mainPrinter => PrinterSettings(
+        kind: printerKind,
+        name: printerName,
+        address: printerAddress,
+        path: printerPath,
+        columns: columns,
+        codePage: codePage,
+        cut: cut,
+        openDrawer: openDrawer,
+        copies: copies,
+      );
+
+  TerminalConfig withMainPrinter(PrinterSettings printer) => copyWith(
+        printerKind: printer.kind,
+        printerName: printer.name,
+        printerAddress: printer.address,
+        printerPath: printer.path,
+        columns: printer.columns,
+        codePage: printer.codePage,
+        cut: printer.cut,
+        openDrawer: printer.openDrawer,
+        copies: printer.copies,
+      );
+
+  TerminalConfig withExtraPrinter(String queue, PrinterSettings printer) => copyWith(extraPrinters: {...extraPrinters, queue: printer});
+
+  /// Configuração para imprimir numa fila: a principal usa a impressora principal; as outras, a escolhida para elas.
+  /// Fila extra ainda sem impressora escolhida devolve null.
+  TerminalConfig? forQueue(String queue, {required String mainQueue}) {
+    if (queue == mainQueue || queue.isEmpty) {
+      return this;
+    }
+
+    final printer = extraPrinters[queue];
+
+    return printer != null && printer.ready ? withMainPrinter(printer) : null;
+  }
 
   bool get printerReady => switch (printerKind) {
         PrinterKind.windows => printerName.isNotEmpty,
@@ -114,6 +165,7 @@ class TerminalConfig {
     bool? insecureTls,
     int? pollSeconds,
     Appearance? appearance,
+    Map<String, PrinterSettings>? extraPrinters,
   }) =>
       TerminalConfig(
         serverUrl: serverUrl ?? this.serverUrl,
@@ -130,6 +182,7 @@ class TerminalConfig {
         insecureTls: insecureTls ?? this.insecureTls,
         pollSeconds: pollSeconds ?? this.pollSeconds,
         appearance: appearance ?? this.appearance,
+        extraPrinters: extraPrinters ?? this.extraPrinters,
       );
 
   Map<String, dynamic> toJson() => {
@@ -149,6 +202,7 @@ class TerminalConfig {
         'insecure_tls': insecureTls,
         'poll_seconds': pollSeconds,
         'appearance': appearance.name,
+        if (extraPrinters.isNotEmpty) 'extra_printers': {for (final entry in extraPrinters.entries) entry.key: entry.value.normalized().toJson()},
       };
 
   /// Pasta da configuração e do log: %APPDATA%\\PertoTerminalFlutter no Windows, ~/.config/perto-terminal no Linux.
