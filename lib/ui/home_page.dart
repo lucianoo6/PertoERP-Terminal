@@ -361,6 +361,10 @@ class _HomePageState extends State<HomePage> {
         listenable: service,
         builder: (context, _) {
           final status = service.status;
+          if (status.stations.isNotEmpty) {
+            return _stationsCard(status);
+          }
+
           final extraQueues = status.queues.where((queue) => queue != status.printerName).toList();
 
           return Column(
@@ -392,6 +396,66 @@ class _HomePageState extends State<HomePage> {
         },
       );
 
+  /// Servidor com setores: cada setor da loja tem uma chave "imprime neste computador" e, ligada, a sua impressora.
+  /// A impressora principal escolhe o setor dela numa lista (nada de digitar nome de fila).
+  Widget _stationsCard(TerminalStatus status) {
+    final mainQueue = _draft.mainQueue.isNotEmpty ? _draft.mainQueue : status.printerName;
+    final main = status.stations.where((station) => station.queue == mainQueue).firstOrNull;
+    final others = status.stations.where((station) => station.queue != mainQueue).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _printerEditor(
+          key: 'main',
+          title: main == null ? 'Impressora principal' : 'Impressora · ${main.name}',
+          subtitle: 'A impressora principal deste computador. O cupom da venda sai no setor Caixa.',
+          header: DropdownButtonFormField<String>(
+            key: ValueKey('main-station-$mainQueue-${status.stations.length}'),
+            initialValue: main?.queue,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Setor desta impressora'),
+            items: [for (final station in status.stations) DropdownMenuItem(value: station.queue, child: Text(station.name))],
+            onChanged: (queue) => setState(() => _draft = _draft.withoutExtraPrinter(queue ?? '').copyWith(mainQueue: queue ?? '')),
+          ),
+          value: _draft.mainPrinter,
+          onChanged: (printer) => setState(() => _draft = _draft.withMainPrinter(printer)),
+        ),
+        if (others.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _Section(
+            icon: Icons.call_split,
+            title: 'Outros setores neste computador',
+            subtitle: 'Tem outra térmica ligada aqui (ex.: cozinha e bar no mesmo PC)? Ligue o setor e escolha a impressora dele.',
+            children: [
+              for (final station in others)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(station.name),
+                  subtitle: Text(_draft.extraPrinters.containsKey(station.queue) ? 'Imprime neste computador' : 'Fica para outro computador'),
+                  value: _draft.extraPrinters.containsKey(station.queue),
+                  onChanged: (on) => setState(() => _draft = on ? _draft.withExtraPrinter(station.queue, const PrinterSettings()) : _draft.withoutExtraPrinter(station.queue)),
+                ),
+            ],
+          ),
+        ],
+        for (final station in others)
+          if (_draft.extraPrinters.containsKey(station.queue)) ...[
+            const SizedBox(height: 12),
+            _printerEditor(
+              key: station.queue,
+              title: 'Impressora · ${station.name}',
+              subtitle: status.queuesWithoutPrinter.contains(station.queue) ? 'Escolha a impressora e salve: os pedidos deste setor ficam esperando até lá.' : null,
+              warning: status.queuesWithoutPrinter.contains(station.queue),
+              value: _draft.extraPrinters[station.queue] ?? const PrinterSettings(),
+              onChanged: (printer) => setState(() => _draft = _draft.withExtraPrinter(station.queue, printer)),
+              showDrawer: false,
+            ),
+          ],
+      ],
+    );
+  }
+
   /// "cozinha" → "da cozinha", "copa-2" → "da copa 2" (para os títulos dos blocos).
   String _queueLabel(String queue) {
     final name = queue.replaceAll('-', ' ').trim();
@@ -407,6 +471,7 @@ class _HomePageState extends State<HomePage> {
     required PrinterSettings value,
     required ValueChanged<PrinterSettings> onChanged,
     bool showDrawer = true,
+    Widget? header,
   }) {
     final theme = Theme.of(context);
 
@@ -415,6 +480,7 @@ class _HomePageState extends State<HomePage> {
       title: title,
       subtitle: subtitle,
       children: [
+        if (header != null) ...[header, const SizedBox(height: 12)],
         SegmentedButton<PrinterKind>(
           showSelectedIcon: false,
           segments: const [

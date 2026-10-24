@@ -33,9 +33,19 @@ class RealtimeInfo {
 }
 
 class Me {
-  Me({required this.name, required this.printerName, required this.channel, this.realtime, List<String>? queues, Map<String, String>? channels})
-      : queues = queues == null || queues.isEmpty ? [printerName] : queues,
+  Me({
+    required this.name,
+    required this.printerName,
+    required this.channel,
+    this.realtime,
+    List<String>? queues,
+    Map<String, String>? channels,
+    this.stations = const [],
+  })  : queues = queues == null || queues.isEmpty ? [printerName] : queues,
         channels = channels ?? {};
+
+  /// Setores da loja para escolher ao lado de cada impressora. Servidores antigos não mandam (lista vazia).
+  final List<Station> stations;
 
   final String name;
 
@@ -61,6 +71,14 @@ class Me {
 
     return '${channel.substring(0, channel.length - printerName.length)}$queue';
   }
+}
+
+/// Setor de impressão da loja (Caixa, Cozinha, Bar…), cadastrado no PertoERP.
+class Station {
+  const Station({required this.queue, required this.name});
+
+  final String queue;
+  final String name;
 }
 
 class Job {
@@ -108,8 +126,17 @@ class ApiClient {
     }
   }
 
-  Future<Me> me() async {
-    final json = await _request('GET', '/api/v1/terminal/me') as Map<String, dynamic>;
+  Future<Me> me() async => _me(await _request('GET', '/api/v1/terminal/me') as Map<String, dynamic>);
+
+  /// Avisa o PertoERP quais setores este computador imprime (o principal primeiro) e devolve o cadastro atualizado.
+  Future<Me> updateQueues(List<String> queues) async => _me(await _request(
+        'POST',
+        '/api/v1/terminal/queues',
+        body: jsonEncode({'queues': queues}),
+        contentType: 'application/json',
+      ) as Map<String, dynamic>);
+
+  Me _me(Map<String, dynamic> json) {
     final realtime = json['realtime'];
 
     return Me(
@@ -118,6 +145,10 @@ class ApiClient {
       channel: '${json['channel'] ?? ''}',
       queues: (json['queues'] as List? ?? []).map((queue) => '$queue').where((queue) => queue.isNotEmpty).toList(),
       channels: json['channels'] is Map ? (json['channels'] as Map).map((key, value) => MapEntry('$key', '$value')) : null,
+      stations: [
+        for (final station in (json['stations'] as List? ?? const []))
+          if (station is Map && '${station['queue'] ?? ''}'.isNotEmpty) Station(queue: '${station['queue']}', name: '${station['name'] ?? station['queue']}'),
+      ],
       realtime: realtime is Map && '${realtime['key'] ?? ''}'.isNotEmpty
           ? RealtimeInfo(
               key: '${realtime['key']}',

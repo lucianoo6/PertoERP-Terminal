@@ -23,6 +23,7 @@ class TerminalStatus {
     this.printed = 0,
     this.queues = const [],
     this.queuesWithoutPrinter = const [],
+    this.stations = const [],
   });
 
   final bool configured;
@@ -46,6 +47,9 @@ class TerminalStatus {
   /// Filas extras ainda sem impressora escolhida neste computador: os pedidos delas ficam esperando.
   final List<String> queuesWithoutPrinter;
 
+  /// Setores da loja (Caixa, Cozinha, Bar…), para escolher ao lado de cada impressora.
+  final List<Station> stations;
+
   Health get health => switch (this) {
         TerminalStatus(configured: false) => Health.setup,
         TerminalStatus(connected: false) => Health.error,
@@ -66,6 +70,7 @@ class TerminalStatus {
     int? printed,
     List<String>? queues,
     List<String>? queuesWithoutPrinter,
+    List<Station>? stations,
   }) =>
       TerminalStatus(
         configured: configured ?? this.configured,
@@ -78,6 +83,7 @@ class TerminalStatus {
         printed: printed ?? this.printed,
         queues: queues ?? this.queues,
         queuesWithoutPrinter: queuesWithoutPrinter ?? this.queuesWithoutPrinter,
+        stations: stations ?? this.stations,
       );
 }
 
@@ -150,7 +156,7 @@ class TerminalService extends ChangeNotifier {
     await stop();
     final generation = _generation;
 
-    _status = TerminalStatus(configured: _config.configured, printed: _status.printed, lastPrintAt: _status.lastPrintAt, queues: _status.queues);
+    _status = TerminalStatus(configured: _config.configured, printed: _status.printed, lastPrintAt: _status.lastPrintAt, queues: _status.queues, stations: _status.stations);
     notifyListeners();
 
     if (!_config.configured) {
@@ -166,8 +172,13 @@ class TerminalService extends ChangeNotifier {
     final client = _apiFactory(config);
     _client = client;
 
-    final me = await _identify(generation, client);
+    var me = await _identify(generation, client);
     if (me == null || !_alive(generation)) {
+      return;
+    }
+
+    me = await _syncQueues(client, config, me);
+    if (!_alive(generation)) {
       return;
     }
 
@@ -212,6 +223,39 @@ class TerminalService extends ChangeNotifier {
     }
   }
 
+  /// Os setores escolhidos aqui valem: se o PertoERP tem outros para este computador, atualiza lá.
+  /// Servidor antigo (sem setores) ou setor apagado no painel: segue com o que o PertoERP informou.
+  Future<Me> _syncQueues(ApiClient client, TerminalConfig config, Me me) async {
+    final chosen = config.chosenQueues;
+    if (chosen.isEmpty || me.stations.isEmpty || _sameQueues(chosen, me.queues)) {
+      return me;
+    }
+
+    try {
+      final updated = await client.updateQueues(chosen);
+      log('setores deste computador: ${updated.queues.join(', ')}');
+      _showQueues(updated);
+
+      return updated;
+    } catch (error) {
+      log('setores: $error');
+      _update((status) => status.copyWith(lastError: 'Setores: $error'));
+
+      return me;
+    }
+  }
+
+  static bool _sameQueues(List<String> a, List<String> b) => a.length == b.length && [for (var i = 0; i < a.length; i++) a[i] == b[i]].every((same) => same);
+
+  void _showQueues(Me me) => _update((status) => status.copyWith(
+        connected: true,
+        device: me.name,
+        printerName: me.printerName,
+        queues: me.queues,
+        stations: me.stations,
+        queuesWithoutPrinter: me.queues.where((queue) => _config.forQueue(queue, mainQueue: me.printerName) == null).toList(),
+      ));
+
   Future<Me?> _identify(int generation, ApiClient client) async {
     var backoff = const Duration(seconds: 2);
 
@@ -219,14 +263,8 @@ class TerminalService extends ChangeNotifier {
       try {
         final me = await client.me();
         log('conectado como "${me.name}" (filas ${me.queues.map((queue) => '"$queue"').join(', ')})');
-        _update((status) => status.copyWith(
-              connected: true,
-              device: me.name,
-              printerName: me.printerName,
-              lastError: '',
-              queues: me.queues,
-              queuesWithoutPrinter: me.queues.where((queue) => _config.forQueue(queue, mainQueue: me.printerName) == null).toList(),
-            ));
+        _update((status) => status.copyWith(lastError: ''));
+        _showQueues(me);
 
         return me;
       } catch (error) {
