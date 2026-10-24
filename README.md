@@ -27,7 +27,7 @@ Ele é um programa pequeno que você instala **uma vez** no computador onde a im
 - 💵 **Abre a gaveta de dinheiro** sozinho quando a venda é paga em dinheiro (opcional).
 - ✂️ **Corta o papel** no fim de cada cupom, se a impressora tiver guilhotina.
 - 🔁 **Não perde impressão:** se a internet cair, ele imprime tudo o que ficou pendente assim que ela voltar.
-- 🖨️ **Mais de uma impressora:** cozinha, balcão, depósito. Cada computador com o seu terminal.
+- 🖨️ **Caixa, cozinha, bar…:** cada impressora escolhe o seu setor numa lista que vem do PertoERP. Um computador pode ter várias térmicas (ex.: cozinha e bar no mesmo PC), ou cada setor com o seu computador.
 
 ## Impressoras compatíveis
 

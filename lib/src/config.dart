@@ -29,6 +29,7 @@ class TerminalConfig {
     this.pollSeconds = 5,
     this.appearance = Appearance.light,
     this.extraPrinters = const {},
+    this.mainQueue = '',
   });
 
   /// Mesmo formato de arquivo da versão em Go (o token vai cifrado pelo DPAPI).
@@ -56,6 +57,7 @@ class TerminalConfig {
                 if (entry.value is Map) '${entry.key}': PrinterSettings.fromJson((entry.value as Map).cast<String, dynamic>()),
             }
           : const {},
+      mainQueue: '${json['main_queue'] ?? ''}',
     ).normalized();
   }
 
@@ -88,6 +90,18 @@ class TerminalConfig {
   /// Outras impressoras deste computador, por fila do PertoERP (ex.: "cozinha", "bar").
   /// A fila principal do terminal usa a impressora dos campos acima.
   final Map<String, PrinterSettings> extraPrinters;
+
+  /// Setor da impressora principal, escolhido aqui (vazio: vale o que está no PertoERP, como nas versões antigas).
+  final String mainQueue;
+
+  /// Setores que este computador imprime, para avisar o PertoERP: o da impressora principal primeiro.
+  List<String> get chosenQueues => [
+        if (mainQueue.isNotEmpty) mainQueue,
+        for (final entry in extraPrinters.entries)
+          if (entry.key != mainQueue && entry.value.ready) entry.key,
+      ];
+
+  TerminalConfig withoutExtraPrinter(String queue) => copyWith(extraPrinters: {...extraPrinters}..remove(queue));
 
   /// Impressora da fila principal, no mesmo formato das outras.
   PrinterSettings get mainPrinter => PrinterSettings(
@@ -166,6 +180,7 @@ class TerminalConfig {
     int? pollSeconds,
     Appearance? appearance,
     Map<String, PrinterSettings>? extraPrinters,
+    String? mainQueue,
   }) =>
       TerminalConfig(
         serverUrl: serverUrl ?? this.serverUrl,
@@ -183,6 +198,7 @@ class TerminalConfig {
         pollSeconds: pollSeconds ?? this.pollSeconds,
         appearance: appearance ?? this.appearance,
         extraPrinters: extraPrinters ?? this.extraPrinters,
+        mainQueue: mainQueue ?? this.mainQueue,
       );
 
   Map<String, dynamic> toJson() => {
@@ -202,6 +218,7 @@ class TerminalConfig {
         'insecure_tls': insecureTls,
         'poll_seconds': pollSeconds,
         'appearance': appearance.name,
+        if (mainQueue.isNotEmpty) 'main_queue': mainQueue,
         if (extraPrinters.isNotEmpty) 'extra_printers': {for (final entry in extraPrinters.entries) entry.key: entry.value.normalized().toJson()},
       };
 
